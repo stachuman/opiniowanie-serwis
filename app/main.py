@@ -1196,20 +1196,72 @@ def list_documents(request: Request):
          "index.html", 
          {"request": request, "docs": docs, "icons": STEP_ICON, "title": "Dokumenty"})
 
+
 @app.get("/opinions")
-def list_opinions(request: Request):
-    """Lista głównych dokumentów (opinii)."""
+def list_opinions(request: Request, 
+                  k1: bool | None = None,
+                  k2: bool | None = None, 
+                  k3: bool | None = None,
+                  k4: bool | None = None,
+                  search: str | None = None):
+    """Lista głównych dokumentów (opinii) z filtrowaniem i wyszukiwaniem."""
     with Session(engine) as session:
-        # Pobierz tylko dokumenty główne (is_main=True)
-        opinions = session.exec(
-            select(Document)
-            .where(Document.is_main == True)
-            .order_by(Document.upload_time.desc())
-        ).all()
+        # Rozpocznij z podstawowym zapytaniem
+        query = select(Document).where(Document.is_main == True)
+        
+        # Przygotuj listę dozwolonych kroków - domyślnie wszystkie oprócz k4 (archiwum)
+        allowed_steps = []
+        
+        # Jeśli żadne parametry nie są ustawione, użyj domyślnych (wszystkie oprócz k4)
+        if k1 is None and k2 is None and k3 is None and k4 is None:
+            allowed_steps = ['k1', 'k2', 'k3']
+        else:
+            # Jeśli parametry są ustawione, dodaj tylko te które są True
+            if k1:
+                allowed_steps.append('k1')
+            if k2:
+                allowed_steps.append('k2')
+            if k3:
+                allowed_steps.append('k3')
+            if k4:
+                allowed_steps.append('k4')
+        
+        # Zastosuj filtr kroków jeśli są jakieś dozwolone
+        if allowed_steps:
+            query = query.where(Document.step.in_(allowed_steps))
+        
+        # Zastosuj wyszukiwanie tekstowe
+        if search and search.strip():
+            search_term = f"%{search.strip()}%"
+            query = query.where(
+                (Document.sygnatura.ilike(search_term)) | 
+                (Document.original_filename.ilike(search_term))
+            )
+        
+        # Wykonaj zapytanie z sortowaniem
+        opinions = session.exec(query.order_by(Document.upload_time.desc())).all()
+        
+        # Przygotuj dane o aktualnych filtrach do przekazania do szablonu
+        current_filters = {
+            'k1': k1 if k1 is not None else (k1 is None),  # True jeśli nie określono lub jawnie True
+            'k2': k2 if k2 is not None else (k2 is None),
+            'k3': k3 if k3 is not None else (k3 is None),
+            'k4': k4 if k4 is not None else False,  # False domyślnie dla archiwum
+            'search': search or ''
+        }
+        
         return templates.TemplateResponse(
             "opinions.html", 
-            {"request": request, "opinions": opinions, "icons": STEP_ICON, "title": "Opinie sądowe"}
+            {
+                "request": request, 
+                "opinions": opinions, 
+                "icons": STEP_ICON, 
+                "title": "Opinie sądowe",
+                "current_filters": current_filters,
+                "total_count": len(opinions)
+            }
         )
+
 
 @app.get("/opinion/{doc_id}")
 def opinion_detail(request: Request, doc_id: int):
