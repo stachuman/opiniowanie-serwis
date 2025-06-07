@@ -1,206 +1,100 @@
 {% extends 'base.html' %}
+
+<!-- Breadcrumbs, page_title i page_actions są automatycznie ustawiane w base.html -->
+
 {% block content %}
-
-<!-- Powiadomienia -->
-{% if request.query_params.get('delete_message') %}
-<div class="alert alert-success alert-dismissible fade show mb-4">
-  <i class="bi bi-check-circle-fill me-2"></i> {{ request.query_params.get('delete_message') }}
-  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-</div>
-{% endif %}
-
-{% if request.query_params.get('ocr_started') == 'true' %}
-<div class="alert alert-info alert-dismissible fade show mb-4">
-  <i class="bi bi-lightning-fill me-2"></i>
-  {% set count = request.query_params.get('count', '1') %}
-  {% if count|int > 1 %}
-    Rozpoczęto proces OCR dla {{ count }} dokumentów. Rozpoznawanie pisma w toku, proszę czekać.
-  {% else %}
-    Rozpoczęto proces OCR. Rozpoznawanie pisma w toku, proszę czekać.
-  {% endif %}
-  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-</div>
-{% endif %}
-
-<!-- Nagłówek strony -->
+<!-- Formularz edycji opinii -->
 <div class="card mb-4">
   <div class="card-header bg-light">
-    <div class="d-flex justify-content-between align-items-center">
-      <h5 class="mb-0">
-        <i class="bi bi-file-earmark-text me-2"></i>Opinia #{{ opinion.id }}
-      </h5>
-      <a href="{{ url_for('list_opinions') }}" class="btn btn-sm btn-outline-secondary">
-        <i class="bi bi-arrow-left"></i> Powrót do listy
-      </a>
-    </div>
-  </div>
-</div>
-
-<!-- Informacje o opinii -->
-<div class="card mb-4">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <h5 class="mb-0">Informacje o opinii</h5>
-    <span class="badge {{ 'bg-danger' if opinion.step == 'k1' else 'bg-warning' if opinion.step == 'k2' else 'bg-success' if opinion.step == 'k3' else 'bg-secondary' }} p-2">
-      {% if opinion.step == 'k1' %}
-        <i class="bi bi-pencil-fill me-1"></i>
-      {% elif opinion.step == 'k2' %}
-        <i class="bi bi-journals me-1"></i>
-      {% elif opinion.step == 'k3' %}
-        <i class="bi bi-check-circle-fill me-1"></i>
-      {% else %}
-        <i class="bi bi-archive-fill me-1"></i>
-      {% endif %}
-      {{ opinion.step }}
-    </span>
+    <h5 class="card-title mb-0">
+      <i class="bi bi-pencil me-2"></i>Edycja opinii
+    </h5>
   </div>
   <div class="card-body">
     <form method="post" action="{{ url_for('opinion_update', doc_id=opinion.id) }}">
       <div class="row mb-3">
-        <div class="col-md-6">
-          <label class="form-label">Sygnatura sprawy</label>
-          <input type="text" name="sygnatura" class="form-control" value="{{ opinion.sygnatura or '' }}">
+        <div class="col-md-4">
+          <label for="sygnatura" class="form-label">Sygnatura sprawy</label>
+          <input type="text" class="form-control" id="sygnatura" name="sygnatura"
+                 value="{{ opinion.sygnatura or '' }}" placeholder="Np. IV K 123/23">
         </div>
-        <div class="col-md-6">
-          <label class="form-label">Status opinii</label>
-          <select name="step" class="form-select">
-            {% for val, label in steps %}
-              <option value="{{ val }}" {% if val==opinion.step %}selected{% endif %}>{{ label }}</option>
+        <div class="col-md-4">
+          <label for="step" class="form-label">Status sprawy</label>
+          <select class="form-select" id="step" name="step">
+            {% for step_value, step_name in steps %}
+              <option value="{{ step_value }}"
+                      {{ 'selected' if opinion.step == step_value else '' }}>
+                {{ step_name }}
+              </option>
             {% endfor %}
           </select>
         </div>
-      </div>
-      
-      <div class="row mb-3">
-        <div class="col-12">
-          <label class="form-label">Komentarze/uwagi</label>
-          <textarea name="note" class="form-control" rows="3">{{ opinion.note or '' }}</textarea>
+        <div class="col-md-4">
+          <label for="note" class="form-label">Notatka</label>
+          <input type="text" class="form-control" id="note" name="note"
+                 value="{{ opinion.note or '' }}" placeholder="Dodatkowe informacje">
         </div>
       </div>
-      
-      <div class="row">
-        <div class="col-md-6">
-          <div class="card bg-light">
-            <div class="card-body py-2">
-              <p class="mb-1"><strong><i class="bi bi-file-earmark me-1"></i>Nazwa pliku:</strong> {{ opinion.original_filename }}</p>
-              <p class="mb-1"><strong><i class="bi bi-calendar-event me-1"></i>Data utworzenia:</strong> {{ opinion.upload_time.strftime('%Y-%m-%d %H:%M') }}</p>
-              {% if opinion.last_modified %}
-                <p class="mb-1"><strong><i class="bi bi-clock me-1"></i>Ostatnia modyfikacja:</strong> {{ opinion.last_modified.strftime('%Y-%m-%d %H:%M') }}</p>
-              {% endif %}
-            </div>
-          </div>
-        </div>
-
-        <div class="col-md-6">
-          <!-- Przyciski akcji -->
-          <div class="d-flex flex-wrap justify-content-end gap-2">
-            <div class="btn-group">
-              <button type="submit" class="btn btn-primary">
-                <i class="bi bi-save"></i> Zapisz zmiany
-              </button>
-            </div>
-            
-            <div class="btn-group">
-              {% if opinion.stored_filename.endswith('.empty') %}
-                <a href="{{ url_for('document_update_form', doc_id=opinion.id) }}" class="btn btn-outline-primary">
-                  <i class="bi bi-upload"></i> Wgraj dokument Word
-                </a>
-              {% else %}
-                <a href="{{ url_for('document_update_form', doc_id=opinion.id) }}" class="btn btn-outline-warning">
-                  <i class="bi bi-pencil"></i> Aktualizuj dokument
-                </a>
-              {% endif %}
-              <a href="{{ url_for('document_history', doc_id=opinion.id) }}" class="btn btn-outline-info">
-                <i class="bi bi-clock-history"></i> Historia wersji
-              </a>
-            </div>
-            
-            <div class="btn-group">
-              <a href="{{ url_for('document_download', doc_id=opinion.id) }}" class="btn btn-outline-secondary">
-                <i class="bi bi-download"></i> Pobierz dokument opinii (Word)
-              </a>
-              
-              <!-- Przycisk usuwania opinii -->
-              <button type="button" class="btn btn-outline-danger"
-                     data-bs-toggle="modal" data-bs-target="#deleteConfirmModal">
-                <i class="bi bi-trash"></i> Usuń opinię
-              </button>
-            </div>
-          </div>
-        </div>
+      <div class="d-flex justify-content-end">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-check-lg me-1"></i>Zapisz zmiany
+        </button>
       </div>
     </form>
   </div>
 </div>
 
+<!-- Statystyki OCR - tylko gdy są aktywne procesy -->
+{% if has_active_ocr %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center">
+        <h6 class="mb-0">
+          <i class="bi bi-gear-fill me-2"></i>Status przetwarzania OCR
+        </h6>
+        <div class="d-flex gap-2 flex-wrap">
+          <span class="badge bg-success p-2">
+            <i class="bi bi-check-circle me-1"></i>{{ done_docs }} gotowych
+          </span>
+          <span class="badge bg-danger p-2">
+            <i class="bi bi-x-circle me-1"></i>{{ failed_docs }} z błędami
+          </span>
+          <span class="badge bg-warning p-2">
+            <i class="bi bi-arrow-repeat me-1"></i>{{ running_docs }} w trakcie
+          </span>
+          <span class="badge bg-secondary p-2">
+            <i class="bi bi-hourglass-split me-1"></i>{{ pending_docs }} oczekujących
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
 <!-- Dokumenty powiązane -->
-<div class="card mb-4">
+<div class="card">
   <div class="card-header d-flex justify-content-between align-items-center">
     <h5 class="mb-0"><i class="bi bi-files me-2"></i>Dokumenty powiązane</h5>
-    <a href="{{ url_for('opinion_upload_form', doc_id=opinion.id) }}" class="btn btn-outline-primary">
-      <i class="bi bi-plus-circle"></i> Dodaj dokumenty
-    </a>
+    <!-- Przycisk dodawania jest już w page_actions w header -->
   </div>
   <div class="card-body">
     {% if grouped_docs|length == 0 %}
       <div class="alert alert-info">
-        <i class="bi bi-info-circle me-2"></i> Brak dokumentów powiązanych z tą opinią.
-        <a href="{{ url_for('opinion_upload_form', doc_id=opinion.id) }}" class="alert-link">Dodaj pierwsze dokumenty</a>
+        <i class="bi bi-info-circle me-2"></i>
+        Brak dokumentów powiązanych z tą opinią.
+        <a href="{{ url_for('opinion_upload_form', doc_id=opinion.id) }}"
+           class="alert-link">Dodaj pierwsze dokumenty</a>.
       </div>
     {% else %}
-      
-      <!-- Status OCR dokumentów -->
-      {% if has_active_ocr %}
-        <div class="card mb-3">
-          <div class="card-header bg-light">
-            <h6 class="mb-0"><i class="bi bi-activity me-2"></i>Status OCR dokumentów</h6>
-          </div>
-          <div class="card-body">
-            <div class="progress" style="height: 25px;">
-              {% set progress_width = ((done_docs + failed_docs) / total_docs) * 100 if total_docs > 0 else 0 %}
-              <div class="progress-bar bg-success" role="progressbar" 
-                   style="width: {{ (done_docs / total_docs) * 100 if total_docs > 0 else 0 }}%" 
-                   aria-valuenow="{{ done_docs }}" aria-valuemin="0" aria-valuemax="{{ total_docs }}">
-                {{ done_docs }}
-              </div>
-              <div class="progress-bar bg-danger" role="progressbar" 
-                   style="width: {{ (failed_docs / total_docs) * 100 if total_docs > 0 else 0 }}%" 
-                   aria-valuenow="{{ failed_docs }}" aria-valuemin="0" aria-valuemax="{{ total_docs }}">
-                {{ failed_docs }}
-              </div>
-              <div class="progress-bar bg-warning progress-bar-striped progress-bar-animated" role="progressbar" 
-                   style="width: {{ (running_docs / total_docs) * 100 if total_docs > 0 else 0 }}%" 
-                   aria-valuenow="{{ running_docs }}" aria-valuemin="0" aria-valuemax="{{ total_docs }}">
-                {{ running_docs }}
-              </div>
-              <div class="progress-bar bg-secondary progress-bar-striped" role="progressbar" 
-                   style="width: {{ (pending_docs / total_docs) * 100 if total_docs > 0 else 0 }}%" 
-                   aria-valuenow="{{ pending_docs }}" aria-valuemin="0" aria-valuemax="{{ total_docs }}">
-                {{ pending_docs }}
-              </div>
-            </div>
-            <div class="d-flex justify-content-between mt-2">
-              <div>
-                <span class="badge bg-success p-2 me-1"><i class="bi bi-check-circle me-1"></i>{{ done_docs }} zakończonych</span>
-                <span class="badge bg-danger p-2 me-1"><i class="bi bi-x-circle me-1"></i>{{ failed_docs }} z błędami</span>
-                <span class="badge bg-warning p-2 me-1"><i class="bi bi-arrow-repeat me-1"></i>{{ running_docs }} w trakcie</span>
-                <span class="badge bg-secondary p-2"><i class="bi bi-hourglass-split me-1"></i>{{ pending_docs }} oczekujących</span>
-              </div>
-              <div>
-                <span class="badge bg-dark p-2"><i class="bi bi-files me-1"></i>Łącznie: {{ total_docs }} dokumentów</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      {% endif %}
-
-      <!-- Karty z grupami dokumentów -->
+      <!-- Akordeon z grupami dokumentów -->
       <div class="accordion" id="documentsAccordion">
         {% for doc_type, docs in grouped_docs.items() %}
           <div class="accordion-item">
             <h2 class="accordion-header" id="heading{{ doc_type|replace(' ', '') }}">
-              <button class="accordion-button" type="button" data-bs-toggle="collapse" 
-                      data-bs-target="#collapse{{ doc_type|replace(' ', '') }}" 
-                      aria-expanded="true" aria-controls="collapse{{ doc_type|replace(' ', '') }}">
+              <button class="accordion-button" type="button" data-bs-toggle="collapse"
+                      data-bs-target="#collapse{{ doc_type|replace(' ', '') }}"
+                      aria-expanded="true">
+                <!-- Ikony dla różnych typów dokumentów -->
                 {% if doc_type == 'Opinia' %}
                   <i class="bi bi-file-earmark-text me-2"></i>
                 {% elif doc_type == 'Akta' %}
@@ -214,38 +108,57 @@
                 {% else %}
                   <i class="bi bi-files me-2"></i>
                 {% endif %}
-                {{ doc_type }} <span class="badge bg-secondary ms-2">{{ docs|length }}</span>
+                {{ doc_type }}
+                <span class="badge bg-secondary ms-2">{{ docs|length }}</span>
               </button>
             </h2>
-            <div id="collapse{{ doc_type|replace(' ', '') }}" class="accordion-collapse collapse show" 
-                 aria-labelledby="heading{{ doc_type|replace(' ', '') }}">
+            <div id="collapse{{ doc_type|replace(' ', '') }}" class="accordion-collapse collapse show">
               <div class="accordion-body p-0">
                 <div class="table-responsive">
                   <table class="table table-hover mb-0">
                     <thead class="table-light">
                       <tr>
-                        <th>Nazwa pliku</th>
-                        <th>Notatka</th>
-                        <th class="text-center">Typ</th>
-                        <th class="text-center">OCR</th>
-                        <th>Data dodania</th>
-                        <th class="text-end">Akcje</th>
+                        <th scope="col" width="60">Typ</th>
+                        <th scope="col">Nazwa pliku</th>
+                        <th scope="col">Notatka</th>
+                        <th scope="col" width="100" class="text-center">OCR</th>
+                        <th scope="col" width="150">Data dodania</th>
+                        <th scope="col" width="120" class="text-center">Akcje</th>
                       </tr>
                     </thead>
                     <tbody>
                       {% for doc in docs %}
-<!-- Zmodyfikowany fragment wiersza tabeli z dokumentami -->
-<tr>
-  <td>{{ doc.original_filename }}</td>
-  <td>
+                        <tr data-href="{{ url_for('document_detail', doc_id=doc.id) }}">
+                          <td>
+                            <!-- Ikony typów plików -->
+                            {% if doc.mime_type and doc.mime_type.startswith('image/') %}
+                              <i class="bi bi-file-earmark-image text-info" title="Obraz"></i>
+                            {% elif doc.mime_type == 'application/pdf' %}
+                              <i class="bi bi-file-earmark-pdf text-danger" title="PDF"></i>
+                            {% elif doc.mime_type and 'word' in doc.mime_type %}
+                              <i class="bi bi-file-earmark-word text-primary" title="Word"></i>
+                            {% elif doc.doc_type == 'OCR TXT' %}
+                              <i class="bi bi-file-earmark-text text-success" title="Wynik OCR"></i>
+                            {% else %}
+                              <i class="bi bi-file-earmark" title="Dokument"></i>
+                            {% endif %}
+                          </td>
+                          <td>
+                            <strong>{{ doc.original_filename }}</strong>
+                            {% if doc.note %}
+                              <br><small class="text-muted">{{ doc.note }}</small>
+                            {% endif %}
+                          </td>
+
+                            <td>
     {% if doc.note %}
       <span class="text-muted">{{ doc.note }}</span>
     {% else %}
       <span class="text-muted small"><em>Brak notatki</em></span>
     {% endif %}
-    <button type="button" class="btn btn-sm btn-outline-secondary ms-2 py-0 px-1" 
-            data-doc-id="{{ doc.id }}" 
-            data-bs-toggle="modal" 
+    <button type="button" class="btn btn-sm btn-outline-secondary ms-2 py-0 px-1"
+            data-doc-id="{{ doc.id }}"
+            data-bs-toggle="modal"
             data-bs-target="#noteEditModal"
             title="Edytuj notatkę">
       <i class="bi bi-pencil-square"></i>
@@ -253,110 +166,45 @@
     <!-- Ukryte pole zawierające treść notatki -->
     <div id="note-content-{{ doc.id }}" style="display: none;">{{ doc.note|default('', true) }}</div>
   </td>
-  <td class="text-center">
-    {% if doc.mime_type and doc.mime_type.startswith('image/') %}
-      <i class="bi bi-file-earmark-image text-info" title="Obraz"></i>
-    {% elif doc.mime_type == 'application/pdf' %}
-      <i class="bi bi-file-earmark-pdf text-danger" title="PDF"></i>
-    {% elif doc.mime_type and doc.mime_type.startswith('application/') and 'word' in doc.mime_type %}
-      <i class="bi bi-file-earmark-word text-primary" title="Word"></i>
-    {% elif doc.mime_type == 'text/plain' %}
-      <i class="bi bi-file-earmark-text text-secondary" title="TXT"></i>
-    {% else %}
-      <i class="bi bi-file-earmark" title="Dokument"></i>
-    {% endif %}
-  </td>
+
 
                           <td class="text-center">
+                            <!-- Status OCR -->
                             {% if doc.ocr_status == 'done' %}
-                              <span class="badge bg-success p-2">
+                              <span class="badge bg-success">
                                 <i class="bi bi-check-circle"></i>
-                                {% if doc.ocr_confidence %}
-                                  <small class="ms-1">{{ (doc.ocr_confidence * 100) | round }}%</small>
-                                {% endif %}
                               </span>
                             {% elif doc.ocr_status == 'running' %}
-                              <div class="d-flex align-items-center" title="{{ doc.ocr_progress_info or 'OCR w trakcie' }}">
-                                <div class="progress flex-grow-1" style="height: 12px; width: 60px;">
-                                  <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" 
-                                      role="progressbar" 
-                                      style="width: {{ (doc.ocr_progress or 0.0) * 100 }}%">
-                                  </div>
-                                </div>
-                                <small class="ms-1 badge bg-primary">{{ ((doc.ocr_progress or 0.0) * 100) | round }}%</small>
-                              </div>
-                            {% elif doc.ocr_status == 'fail' %}
-                              <span class="badge bg-danger p-2">
-                                <i class="bi bi-x-circle"></i>
+                              <span class="badge bg-warning">
+                                <i class="bi bi-arrow-repeat"></i>
                               </span>
                             {% elif doc.ocr_status == 'pending' %}
-                              <span class="badge bg-warning p-2">
+                              <span class="badge bg-secondary">
                                 <i class="bi bi-hourglass-split"></i>
                               </span>
+                            {% elif doc.ocr_status == 'fail' %}
+                              <span class="badge bg-danger">
+                                <i class="bi bi-x-circle"></i>
+                              </span>
+                            {% else %}
+                              <span class="text-muted">—</span>
                             {% endif %}
                           </td>
-                          <td>{{ doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</td>
-
-<td class="text-end document-actions" data-doc-id="{{ doc.id }}" data-doc-name="{{ doc.original_filename }}">
-  <div class="d-flex flex-nowrap gap-1">
-    <!-- Przycisk szybkiego podglądu -->
-    <button type="button" class="btn btn-sm btn-outline-info px-2" 
-      onclick="event.preventDefault(); event.stopPropagation(); quickPreview('{{ doc.id }}', '{{ doc.original_filename }}');" 
-      title="Szybki podgląd">
-      <i class="bi bi-eye"></i>
-    </button>
-    
-    <!-- NOWY: Przycisk podsumowania LLM (tylko dla dokumentów z OCR) -->
-    {% if doc.ocr_status == 'done' %}
-      <a href="{{ url_for('document_summarize_form', doc_id=doc.id) }}" 
-         class="btn btn-sm btn-outline-success px-2" 
-         title="Generuj podsumowanie AI">
-        <i class="bi bi-robot"></i>
-      </a>
-      <!-- Alternatywnie: przycisk modalny dla szybkiego podsumowania -->
-      <button type="button" class="btn btn-sm btn-outline-warning px-2" 
-              onclick="event.preventDefault(); event.stopPropagation(); quickSummarize('{{ doc.id }}', '{{ doc.original_filename }}');" 
-              title="Szybkie podsumowanie AI">
-        <i class="bi bi-stars"></i>
-      </button>
-    {% endif %}
-    
-    <!-- Przycisk uruchamiania OCR -->
-    {% if doc.mime_type and (doc.mime_type == 'application/pdf' or doc.mime_type.startswith('image/')) and doc.ocr_status != 'running' %}
-      <form action="{{ url_for('document_run_ocr', doc_id=doc.id) }}" method="post" class="d-inline">
-        <button type="submit" class="btn btn-sm btn-outline-warning px-2" title="Uruchom OCR">
-          <i class="bi bi-magic"></i>
-        </button>
-      </form>
-    {% endif %}
-    
-    <!-- Przycisk zaawansowanego podglądu PDF -->
-    {% if doc.mime_type == 'application/pdf' %}
-      <a href="{{ url_for('document_pdf_viewer', doc_id=doc.id) }}" class="btn btn-sm btn-outline-success px-2" title="Zaawansowany podgląd PDF">
-        <i class="bi bi-search"></i>
-      </a>
-    {% elif doc.mime_type and doc.mime_type.startswith('image/') %}
-      <a href="{{ url_for('document_image_viewer', doc_id=doc.id) }}" class="btn btn-sm btn-outline-success px-2" title="Zaawansowany podgląd obrazu">
-        <i class="bi bi-search"></i>
-      </a>
-    {% endif %}
-
-    <!-- Przycisk pobierania -->
-    <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-sm btn-outline-secondary px-2" title="Pobierz dokument">
-      <i class="bi bi-download"></i>
-    </a>
-    
-    <!-- Przycisk podglądu tekstu -->
-    {% if doc.ocr_status == 'done' and doc.mime_type == 'text/plain' or (doc.original_filename and doc.original_filename.lower().endswith('.txt')) %}
-      <a href="{{ url_for('document_text_preview', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary px-2" title="Podgląd tekstu">
-        <i class="bi bi-file-earmark-text"></i>
-      </a>
-    {% endif %}
-  </div>
-</td>
-
-
-
+                          <td>
+                            <small>{{ doc.upload_time.strftime('%Y-%m-%d %H:%M') if doc.upload_time else 'Brak' }}</small>
+                          </td>
+                          <td class="text-center">
+                            <div class="btn-group btn-group-sm">
+                              <a href="{{ url_for('document_preview', doc_id=doc.id) }}"
+                                 class="btn btn-outline-primary btn-sm" title="Podgląd">
+                                <i class="bi bi-eye"></i>
+                              </a>
+                              <a href="{{ url_for('document_download', doc_id=doc.id) }}"
+                                 class="btn btn-outline-secondary btn-sm" title="Pobierz">
+                                <i class="bi bi-download"></i>
+                              </a>
+                            </div>
+                          </td>
                         </tr>
                       {% endfor %}
                     </tbody>
@@ -371,58 +219,27 @@
   </div>
 </div>
 
-<!-- Modal podglądu dokumentu -->
-<div class="modal fade" id="quickPreviewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="previewModalTitle">
-          <i class="bi bi-eye me-2"></i>Podgląd dokumentu
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body" id="previewModalBody" style="min-height: 500px; padding: 0;">
-        <div class="d-flex justify-content-center align-items-center" style="height: 500px;">
-          <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-            <span class="visually-hidden">Ładowanie...</span>
-          </div>
-          <span class="ms-3">Wczytywanie podglądu...</span>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <a href="#" class="btn btn-primary" id="previewModalLink">
-          <i class="bi bi-arrows-fullscreen me-1"></i>Otwórz pełny podgląd
-        </a>
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Zamknij</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- Modal potwierdzenia usunięcia -->
 <div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">
-          <i class="bi bi-exclamation-triangle-fill text-danger me-2"></i>Potwierdź usunięcie
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <h5 class="modal-title">Potwierdź usunięcie</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
+        <p>Czy na pewno chcesz usunąć opinię <strong>{{ opinion.sygnatura or opinion.original_filename }}</strong>?</p>
         <div class="alert alert-danger">
           <i class="bi bi-exclamation-triangle-fill me-2"></i>
           <strong>Uwaga!</strong> Usunięcie opinii spowoduje również usunięcie wszystkich powiązanych dokumentów!
         </div>
-        <p>Czy na pewno chcesz usunąć opinię <strong>{{ opinion.original_filename }}</strong>?</p>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
-        <form action="{{ url_for('document_delete', doc_id=opinion.id) }}" method="post">
-          <button type="submit" class="btn btn-danger">
-            <i class="bi bi-trash me-1"></i>Usuń opinię
-          </button>
-        </form>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+        <a href="{{ url_for('document_delete', doc_id=opinion.id) }}"
+           class="btn btn-danger">
+          <i class="bi bi-trash me-1"></i>Usuń opinię
+        </a>
       </div>
     </div>
   </div>
@@ -443,7 +260,7 @@
           <input type="hidden" id="noteDocId" name="doc_id" value="">
           <div class="mb-3">
             <label for="noteContent" class="form-label">Notatka do dokumentu</label>
-            <textarea class="form-control" id="noteContent" name="note" rows="5" 
+            <textarea class="form-control" id="noteContent" name="note" rows="5"
                       placeholder="Wprowadź notatkę dotyczącą tego dokumentu..."></textarea>
           </div>
           <div class="d-flex justify-content-end">
@@ -457,6 +274,7 @@
     </div>
   </div>
 </div>
+
 
 <!-- Modal szybkiego podsumowania AI -->
 <div class="modal fade" id="quickSummaryModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
@@ -475,10 +293,10 @@
             <label for="quickInstruction" class="form-label">
               Instrukcja dla AI <small class="text-muted">(opcjonalna)</small>
             </label>
-            <textarea class="form-control" id="quickInstruction" rows="4" 
+            <textarea class="form-control" id="quickInstruction" rows="4"
                       placeholder="Pozostaw puste aby użyć domyślnej instrukcji lub wprowadź własną..."></textarea>
           </div>
-          
+
           <!-- Opcje zapisu do notatki -->
           <div class="card bg-light mb-3">
             <div class="card-body py-2">
@@ -488,7 +306,7 @@
                   <strong>Zapisz do notatki dokumentu</strong>
                 </label>
               </div>
-              
+
               <div id="quickNoteOptions" class="ms-3">
                 <div class="form-check form-check-inline">
                   <input class="form-check-input" type="radio" name="quickNoteMode" id="quickNoteAppend" value="append" checked>
@@ -505,7 +323,7 @@
               </div>
             </div>
           </div>
-          
+
           <div class="d-flex justify-content-between">
             <div>
               <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadQuickDefaultInstruction()">
@@ -523,7 +341,7 @@
             </button>
           </div>
         </div>
-        
+
         <!-- Obszar ładowania -->
         <div id="summaryLoadingArea" style="display: none;">
           <div class="text-center py-4">
@@ -534,7 +352,7 @@
             <p class="text-muted">AI analizuje dokument. To może potrwać chwilę.</p>
           </div>
         </div>
-        
+
         <!-- Obszar wyniku -->
         <div id="summaryResultArea" style="display: none;">
           <div class="alert alert-success">
@@ -552,7 +370,7 @@
             </a>
           </div>
         </div>
-        
+
         <!-- Obszar błędu -->
         <div id="summaryErrorArea" style="display: none;">
           <div class="alert alert-danger">
@@ -571,26 +389,17 @@
 
 {% block scripts %}
 <script>
-// Sprawdź czy mamy dokumenty w trakcie OCR
-{% if has_active_ocr %}
-(function() {
-  // Odświeżaj stronę co 10 sekund, jeśli mamy dokumenty w trakcie przetwarzania
-  //setTimeout(function() {
-  //  location.reload();
-  //}, 10000);
-})();
-{% endif %}
 document.addEventListener('DOMContentLoaded', function() {
   // Przypisz event listenery do wszystkich przycisków edycji
   document.querySelectorAll('[data-bs-target="#noteEditModal"]').forEach(function(button) {
     button.addEventListener('click', function() {
       const docId = this.getAttribute('data-doc-id');
       const noteContent = document.getElementById('note-content-' + docId).textContent;
-      
+
       document.getElementById('noteDocId').value = docId;
       document.getElementById('noteContent').value = noteContent;
       document.getElementById('noteForm').action = '/document/' + docId + '/update-note';
-      
+
       // Ręczne otwieranie modala (zapasowo, gdyby data-bs-* nie działały)
       const modal = new bootstrap.Modal(document.getElementById('noteEditModal'));
       modal.show();
@@ -602,14 +411,14 @@ document.addEventListener('DOMContentLoaded', function() {
   function prepareNoteEdit(button) {
     // Pobierz ID dokumentu z atrybutu data-doc-id
     const docId = button.getAttribute('data-doc-id');
-    
+
     // Pobierz treść notatki z ukrytego elementu
     const noteContent = document.getElementById(`note-content-${docId}`).textContent;
-    
+
     // Ustaw wartości w formularzu
     document.getElementById('noteDocId').value = docId;
     document.getElementById('noteContent').value = noteContent;
-    
+
     // Ustaw akcję formularza
     document.getElementById('noteForm').action = `/document/${docId}/update-note`;
   }
@@ -618,9 +427,9 @@ document.addEventListener('DOMContentLoaded', function() {
 // Funkcja do szybkiego podglądu dokumentu
 function quickPreview(docId, docName) {
   // Sprawdź MIME type dokumentu lub wywnioskuj z nazwy pliku
-  const isImageOrPdf = docName.toLowerCase().endsWith('.pdf') || 
+  const isImageOrPdf = docName.toLowerCase().endsWith('.pdf') ||
                        docName.toLowerCase().match(/\.(jpg|jpeg|png|gif|tiff|bmp)$/);
-  
+
   if (isImageOrPdf) {
     // Dla PDF i obrazów otwórz bezpośrednio w nowym oknie
     window.open(`/document/${docId}/preview`, '_blank');
@@ -628,10 +437,10 @@ function quickPreview(docId, docName) {
     // Dla innych typów plików używaj modalnego podglądu
     // Ustaw tytuł modalu
     document.getElementById('previewModalTitle').innerHTML = `<i class="bi bi-eye me-2"></i>${docName}`;
-    
+
     // Ustaw link do pełnego podglądu
     document.getElementById('previewModalLink').href = `/document/${docId}`;
-    
+
     // Pokaż spinner ładowania
     document.getElementById('previewModalBody').innerHTML = `
       <div class="d-flex justify-content-center align-items-center" style="height: 500px;">
@@ -641,10 +450,10 @@ function quickPreview(docId, docName) {
         <span class="ms-3">Wczytywanie podglądu...</span>
       </div>
     `;
-    
+
     // Otwórz modal
     new bootstrap.Modal(document.getElementById('quickPreviewModal')).show();
-    
+
     // Pobierz zawartość podglądu
     fetch(`/document/${docId}/preview-content`)
       .then(response => {
@@ -674,7 +483,7 @@ let currentSummaryDocName = null;
 
 // Instrukcje szybkie
 const quickInstructions = {
-  default: `Przeanalizuj poniższy dokument i przygotuj zwięzłe podsumowanie w języku polskim. 
+  default: `Przeanalizuj poniższy dokument i przygotuj zwięzłe podsumowanie w języku polskim.
 
 Podsumowanie powinno zawierać:
 1. **Główną tematykę** - o czym jest dokument
@@ -686,7 +495,7 @@ Zachowaj profesjonalny ton i skup się na merytorycznych aspektach. Maksymalnie 
   medical: `Przeanalizuj ten dokument medyczny i przygotuj strukturalne podsumowanie:
 
 1. **Dane pacjenta** - podstawowe informacje
-2. **Rozpoznanie** - główna diagnoza 
+2. **Rozpoznanie** - główna diagnoza
 3. **Objawy** - zgłaszane dolegliwości
 4. **Badania** - wykonane badania i wyniki
 5. **Leczenie** - zalecenia i leki
@@ -697,7 +506,7 @@ Zachowaj medyczną terminologię i podaj konkretne daty.`,
   legal: `Przeprowadź analizę prawną tego dokumentu:
 
 1. **Charakter dokumentu** - rodzaj pisma prawnego
-2. **Strony postępowania** - podmioty uczestniczące  
+2. **Strony postępowania** - podmioty uczestniczące
 3. **Przedmiot sprawy** - czego dotyczy
 4. **Podstawy prawne** - przywołane przepisy
 5. **Kluczowe ustalenia** - istotne fakty
@@ -709,16 +518,16 @@ Skup się na aspektach merytorycznych i prawnych.`
 function quickSummarize(docId, docName) {
   currentSummaryDocId = docId;
   currentSummaryDocName = docName;
-  
+
   // Ustaw tytuł
   document.getElementById('summaryModalTitle').innerHTML = `<i class="bi bi-robot me-2"></i>Podsumowanie AI: ${docName}`;
-  
+
   // Ustaw link do pełnego edytora
   document.getElementById('fullSummaryLink').href = `/document/${docId}/summarize`;
-  
+
   // Resetuj modal
   resetSummaryModal();
-  
+
   // Pokaż modal
   new bootstrap.Modal(document.getElementById('quickSummaryModal')).show();
 }
@@ -781,7 +590,7 @@ async function generateQuickSummary() {
         let fullText = '';
 
         // Pokaż początkowy spinner z tekstem
-        document.getElementById('summaryLoadingArea').innerHTML = 
+        document.getElementById('summaryLoadingArea').innerHTML =
           '<div class="text-center"><div class="spinner-border text-primary me-3"></div><span>Generowanie...</span></div><div id="liveText" class="mt-3 p-3 bg-light border-start border-success" style="white-space: pre-wrap; font-family: monospace;"></div>';
 
         const liveTextElement = document.getElementById('liveText');
@@ -791,12 +600,12 @@ async function generateQuickSummary() {
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
-          
+
           // Sprawdź czy to błąd
           if (chunk.startsWith('BŁĄD:') || chunk.startsWith('ERROR:')) {
             throw new Error(chunk);
           }
-          
+
           fullText += chunk;
 
           // Na żywo aktualizuj podgląd
@@ -810,9 +619,9 @@ async function generateQuickSummary() {
         document.getElementById('summaryLoadingArea').style.display = 'none';
         document.getElementById('summaryResultArea').style.display = 'block';
         document.getElementById('summaryResultContent').innerHTML = fullText.replace(/\n/g, '<br>');
-        
+
         return; // Sukces streaming
-        
+
       } catch (streamError) {
         console.warn('Streaming nie działa, próbuję tradycyjnie:', streamError);
         // Fallback do non-streaming
@@ -842,21 +651,21 @@ async function debugLLMConnection() {
     const response = await fetch('/api/llm/test-connection');
     const result = await response.json();
     console.log('Wynik testu LLM:', result);
-    
+
     if (result.success) {
       console.log('✅ LLM działa');
-      
+
       // Testuj proste podsumowanie
       console.log('Testowanie prostego podsumowania...');
       const testFormData = new FormData();
       testFormData.append('custom_instruction', 'Bardzo krótko podsumuj: to jest test');
       testFormData.append('save_to_note', 'false');
-      
+
       const summaryResponse = await fetch(`/document/${currentSummaryDocId}/quick-summarize`, {
         method: 'POST',
         body: testFormData,
       });
-      
+
       const summaryResult = await summaryResponse.json();
       console.log('Wynik podsumowania:', summaryResult);
     } else {
@@ -873,7 +682,7 @@ async function debugLLMConnection() {
 document.addEventListener('DOMContentLoaded', function() {
   const quickSaveToNote = document.getElementById('quickSaveToNote');
   const quickNoteOptions = document.getElementById('quickNoteOptions');
-  
+
   if (quickSaveToNote && quickNoteOptions) {
     quickSaveToNote.addEventListener('change', function() {
       if (this.checked) {
@@ -902,7 +711,7 @@ function copySummaryToClipboard() {
       <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     `;
     document.body.appendChild(alertDiv);
-    
+
     // Usuń po 3 sekundach
     setTimeout(() => {
       if (alertDiv.parentNode) {

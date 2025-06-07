@@ -179,6 +179,24 @@ class ContextInfoBuilder:
         return self.items
 
 
+def add_common_context(context: dict) -> dict:
+    """
+    Dodaje wspólne zmienne do kontekstu, które są potrzebne we wszystkich templates.
+    
+    Args:
+        context: Istniejący kontekst template
+    
+    Returns:
+        Zaktualizowany kontekst z dodatkowymi zmiennymi
+    """
+    from datetime import datetime
+    
+    return {
+        **context,
+        "current_year": datetime.now().year,
+        # Dodaj inne wspólne zmienne tutaj w przyszłości
+    }
+
 def build_opinion_navigation(request: Request, opinion: Document,
                              session: Session) -> Dict[str, Any]:
     """
@@ -281,7 +299,7 @@ def build_document_navigation(request: Request, document: Document,
     # OCR actions
     if document.ocr_status != 'done':
         actions_builder.add_primary("Uruchom OCR",
-                                    str(request.url_for('run_ocr', doc_id=document.id)),
+                                    str(request.url_for('document_run_ocr', doc_id=document.id)),
                                     "gear")
 
     # Update actions
@@ -308,7 +326,8 @@ def build_document_navigation(request: Request, document: Document,
                     .add_info("Nazwa pliku", document.original_filename or "Brak")
                     .add_info("Typ dokumentu", document.doc_type or "Nie określono")
                     .add_info("Status OCR", ocr_status, ocr_class)
-                    .add_info("Rozmiar", "Nieznany")  # Można dodać funkcję obliczającą rozmiar
+                    .add_info("Data dodania",
+                              document.upload_time.strftime('%Y-%m-%d %H:%M') if document.upload_time else "Brak")
                     .build())
 
     return {
@@ -346,3 +365,34 @@ def build_simple_navigation(request: Request, title: str,
         'page_actions': [],
         'context_info': []
     }
+
+
+def truncate_name(name: str, max_length: int = 30) -> str:
+    """Skróć długie nazwy w nawigacji."""
+    return name[:max_length] + "..." if len(name) > max_length else name
+
+
+def add_navigation_to_context(request: Request, base_context: dict,
+                              nav_type: str, **nav_kwargs) -> dict:
+    """
+    Helper do dodawania nawigacji do istniejącego kontekstu.
+
+    Args:
+        request: FastAPI Request
+        base_context: Istniejący kontekst szablonu
+        nav_type: Typ nawigacji ('opinion', 'document', 'simple')
+        **nav_kwargs: Dodatkowe argumenty dla buildera nawigacji
+
+    Returns:
+        Zaktualizowany kontekst z elementami nawigacji
+    """
+    if nav_type == 'opinion':
+        navigation = build_opinion_navigation(request, **nav_kwargs)
+    elif nav_type == 'document':
+        navigation = build_document_navigation(request, **nav_kwargs)
+    elif nav_type == 'simple':
+        navigation = build_simple_navigation(request, **nav_kwargs)
+    else:
+        raise ValueError(f"Nieznany typ nawigacji: {nav_type}")
+
+    return {**base_context, **navigation}

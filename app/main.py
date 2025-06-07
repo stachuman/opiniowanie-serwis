@@ -10,6 +10,8 @@ import uuid
 import shutil
 from pathlib import Path
 
+from app.navigation import build_simple_navigation
+
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -81,45 +83,58 @@ async def detect_blocking_operations(request: Request, call_next):
     return response
 
 # ==================== ENDPOINTY UPLOAD ====================
-
 @app.get("/upload")
 def upload_form(request: Request):
     """Formularz uploadowania nowych opinii."""
     from app.document_utils import ALLOWED_EXTENSIONS
     allowed_types = ", ".join(ALLOWED_EXTENSIONS.keys())
-    return templates.TemplateResponse(
-        "upload.html", 
-        {"request": request, "title": "Załaduj nową opinię", "allowed_types": allowed_types}
+
+    # NOWE: Zbuduj prostą nawigację
+    navigation = build_simple_navigation(
+        request,
+        "Dodaj nową opinię",
+        parent_link=("Lista opinii", str(request.url_for('list_opinions')), "list")
     )
+
+    context = {
+        "request": request,
+        "allowed_types": allowed_types,
+        "title": navigation['page_title'],
+        "current_year": datetime.now().year,  # Dodaj rok
+        # NOWE: Elementy nawigacji
+        **navigation
+    }
+
+    return templates.TemplateResponse("upload.html", context)
 
 @app.post("/upload")
 async def upload(request: Request, files: list[UploadFile] = File(...)):
     """Dodawanie nowych głównych dokumentów (opinii)."""
     uploaded_docs = []
-    
+
     with Session(engine) as session:
         for file in files:
             # Sprawdzenie rozszerzenia pliku
             suffix = check_file_extension(file.filename)
-            
+
             # Dla opinii akceptujemy tylko pliki Word
             if suffix.lower() not in ['.doc', '.docx']:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Opinie muszą być w formacie Word (.doc, .docx). Przesłano: {suffix}"
                 )
-            
+
             # Generowanie unikalnej nazwy pliku
             unique_name = f"{uuid.uuid4().hex}{suffix}"
             dest = FILES_DIR / unique_name
-            
+
             # Zapisanie pliku
             with dest.open("wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-            
+
             # Wykrywanie właściwego MIME typu pliku
             actual_mime_type = detect_mime_type(dest)
-            
+
             # Zapisanie do bazy danych jako dokument główny
             doc = Document(
                 original_filename=file.filename,
@@ -143,26 +158,36 @@ async def upload(request: Request, files: list[UploadFile] = File(...)):
         return RedirectResponse(request.url_for("list_opinions"), status_code=303)
 
 # ==================== ENDPOINTY TWORZENIA OPINII ====================
-
 @app.get("/create_empty_opinion")
 def create_empty_opinion_form(request: Request):
     """Formularz tworzenia nowej pustej opinii."""
-    return templates.TemplateResponse(
-        "create_empty_opinion.html", 
-        {"request": request, "title": "Utwórz nową pustą opinię"}
+    # NOWE: Zbuduj nawigację
+    navigation = build_simple_navigation(
+        request,
+        "Utwórz nową pustą opinię",
+        parent_link=("Lista opinii", str(request.url_for('list_opinions')), "list")
     )
+
+    context = {
+        "request": request,
+        "title": navigation['page_title'],
+        "current_year": datetime.now().year,  # Dodaj rok
+        **navigation
+    }
+
+    return templates.TemplateResponse("create_empty_opinion.html", context)
 
 @app.post("/create_empty_opinion")
 def create_empty_opinion(
-    request: Request,
-    sygnatura: str | None = Form(None),
-    doc_type: str = Form(...),
-    step: str = Form("k1")
+        request: Request,
+        sygnatura: str | None = Form(None),
+        doc_type: str = Form(...),
+        step: str = Form("k1")
 ):
     """Utworzenie nowej pustej opinii bez dokumentu."""
     # Generowanie unikalnej nazwy dla "pustego" dokumentu
     unique_name = f"{uuid.uuid4().hex}.empty"
-    
+
     with Session(engine) as session:
         # Utworzenie nowej opinii w bazie danych
         opinion = Document(
@@ -179,7 +204,7 @@ def create_empty_opinion(
         session.add(opinion)
         session.commit()
         opinion_id = opinion.id
-    
+
     # Przekieruj do widoku szczegółów opinii
     return RedirectResponse(request.url_for("opinion_detail", doc_id=opinion_id), status_code=303)
 
@@ -189,12 +214,25 @@ def create_empty_opinion(
 def quick_ocr_form(request: Request):
     """Formularz do szybkiego OCR dokumentów bez przypisywania do opinii."""
     from app.document_utils import ALLOWED_EXTENSIONS
-    allowed_types = ", ".join([k for k in ALLOWED_EXTENSIONS.keys() 
-                              if k not in ['.doc', '.docx']])  # Bez plików Word
-    return templates.TemplateResponse(
-        "quick_ocr.html", 
-        {"request": request, "title": "Szybki OCR", "allowed_types": allowed_types}
+    allowed_types = ", ".join([k for k in ALLOWED_EXTENSIONS.keys()
+                               if k not in ['.doc', '.docx']])  # Bez plików Word
+
+    # NOWE: Zbuduj nawigację
+    navigation = build_simple_navigation(
+        request,
+        "Szybki OCR",
+        parent_link=("Wszystkie dokumenty", str(request.url_for('list_documents')), "files")
     )
+
+    context = {
+        "request": request,
+        "allowed_types": allowed_types,
+        "title": navigation['page_title'],
+        "current_year": datetime.now().year,  # Dodaj rok
+        **navigation
+    }
+
+    return templates.TemplateResponse("quick_ocr.html", context)
 
 @app.post("/quick_ocr")
 async def quick_ocr(request: Request, files: list[UploadFile] = File(...)):
@@ -290,18 +328,35 @@ def opinion_upload_form(request: Request, doc_id: int):
         opinion = session.get(Document, doc_id)
         if not opinion or not opinion.is_main:
             raise HTTPException(status_code=404, detail="Nie znaleziono opinii")
+
+        # NOWE: Zbuduj nawigację
+        from app.navigation import BreadcrumbBuilder
+        
+        breadcrumbs = (BreadcrumbBuilder(request)
+                      .add_home()
+                      .add_opinion(opinion)
+                      .add_current("Dodaj dokumenty", "plus-circle")
+                      .build())
+
+        navigation = {
+            'breadcrumbs': breadcrumbs,
+            'page_title': f"Dodaj dokumenty do opinii: {opinion.sygnatura or opinion.original_filename}",
+            'page_actions': [],
+            'context_info': []
+        }
     
     from app.document_utils import ALLOWED_EXTENSIONS
     allowed_types = ", ".join(ALLOWED_EXTENSIONS.keys())
-    return templates.TemplateResponse(
-        "upload_to_opinion.html", 
-        {
-            "request": request, 
-            "opinion": opinion,
-            "allowed_types": allowed_types,
-            "title": f"Dodaj dokumenty do opinii: {opinion.sygnatura or opinion.original_filename}"
-        }
-    )
+    
+    context = {
+        "request": request, 
+        "opinion": opinion,
+        "allowed_types": allowed_types,
+        "current_year": datetime.now().year,  # Dodaj rok
+        **navigation
+    }
+    
+    return templates.TemplateResponse("upload_to_opinion.html", context)
 
 @app.post("/opinion/{doc_id}/upload")
 async def opinion_upload(request: Request, doc_id: int, 
@@ -453,26 +508,6 @@ def document_preview_content(request: Request, doc_id: int):
 
 # ==================== ENDPOINTY PDF VIEWER ====================
 
-@app.get("/document/{doc_id}/pdf-viewer")
-def document_pdf_viewer(request: Request, doc_id: int):
-    """Zaawansowany podgląd PDF z funkcją zaznaczania i OCR."""
-    with Session(engine) as session:
-        doc = session.get(Document, doc_id)
-        if not doc:
-            raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
-        
-        # Sprawdź czy dokument to PDF
-        if not doc.mime_type or doc.mime_type != 'application/pdf':
-            raise HTTPException(status_code=400, detail="Ten widok jest dostępny tylko dla plików PDF")
-    
-    return templates.TemplateResponse(
-        "pdf_view_with_selection.html", 
-        {
-            "request": request, 
-            "doc": doc,
-            "title": f"Podgląd PDF z zaznaczaniem - {doc.original_filename}"
-        }
-    )
 
 @app.post("/api/document/{doc_id}/ocr-selection")
 async def document_ocr_selection(request: Request, doc_id: int):
@@ -664,6 +699,55 @@ async def document_ocr_selection(request: Request, doc_id: int):
         logger.error(f"Globalny błąd OCR zaznaczenia: {str(e)}", exc_info=True)
         return {"error": f"Błąd: {str(e)}"}
 
+
+@app.get("/document/{doc_id}/pdf-viewer")
+def document_pdf_viewer(request: Request, doc_id: int):
+    """Zaawansowany podgląd PDF z funkcją zaznaczania i OCR."""
+    with Session(engine) as session:
+        doc = session.get(Document, doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
+
+        # Sprawdź czy dokument to PDF
+        if not doc.mime_type or doc.mime_type != 'application/pdf':
+            raise HTTPException(status_code=400, detail="Ten widok jest dostępny tylko dla plików PDF")
+
+        # Pobierz opinię nadrzędną jeśli istnieje
+        parent_opinion = None
+        if doc.parent_id:
+            parent_opinion = session.get(Document, doc.parent_id)
+
+        # NOWE: Zbuduj nawigację
+        from app.navigation import BreadcrumbBuilder
+
+        breadcrumbs = BreadcrumbBuilder(request)
+
+        if parent_opinion:
+            # Dokument należy do opinii
+            breadcrumbs.add_home().add_opinion(parent_opinion).add_document(doc)
+        else:
+            # Dokument samodzielny
+            breadcrumbs.add_documents().add_document(doc)
+
+        breadcrumbs.add_current("Zaawansowany podgląd PDF", "search")
+
+        navigation = {
+            'breadcrumbs': breadcrumbs.build(),
+            'page_title': f"Podgląd PDF z zaznaczaniem - {doc.original_filename}",
+            'page_actions': [],
+            'context_info': []
+        }
+
+    context = {
+        "request": request,
+        "doc": doc,
+        "current_year": datetime.now().year,
+        **navigation
+    }
+
+    return templates.TemplateResponse("pdf_view_with_selection.html", context)
+
+
 @app.get("/document/{doc_id}/image-viewer")
 def document_image_viewer(request: Request, doc_id: int):
     """Zaawansowany podgląd obrazu z funkcją zaznaczania i OCR."""
@@ -675,15 +759,41 @@ def document_image_viewer(request: Request, doc_id: int):
         # Sprawdź czy dokument to obraz
         if not doc.mime_type or not doc.mime_type.startswith('image/'):
             raise HTTPException(status_code=400, detail="Ten widok jest dostępny tylko dla plików obrazowych")
-    
-    return templates.TemplateResponse(
-        "image_view_with_selection.html", 
-        {
-            "request": request, 
-            "doc": doc,
-            "title": f"Podgląd obrazu z zaznaczaniem - {doc.original_filename}"
+
+        # Pobierz opinię nadrzędną jeśli istnieje
+        parent_opinion = None
+        if doc.parent_id:
+            parent_opinion = session.get(Document, doc.parent_id)
+
+        # NOWE: Zbuduj nawigację
+        from app.navigation import BreadcrumbBuilder
+        
+        breadcrumbs = BreadcrumbBuilder(request)
+        
+        if parent_opinion:
+            # Dokument należy do opinii
+            breadcrumbs.add_home().add_opinion(parent_opinion).add_document(doc)
+        else:
+            # Dokument samodzielny
+            breadcrumbs.add_documents().add_document(doc)
+            
+        breadcrumbs.add_current("Zaawansowany podgląd obrazu", "search")
+        
+        navigation = {
+            'breadcrumbs': breadcrumbs.build(),
+            'page_title': f"Podgląd obrazu z zaznaczaniem - {doc.original_filename}",
+            'page_actions': [],
+            'context_info': []
         }
-    )
+    
+    context = {
+        "request": request, 
+        "doc": doc,
+        "current_year": datetime.now().year,
+        **navigation
+    }
+    
+    return templates.TemplateResponse("image_view_with_selection.html", context)
 
 # ==================== FUNKCJE POMOCNICZE ====================
 

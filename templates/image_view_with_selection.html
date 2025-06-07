@@ -18,11 +18,11 @@
             <i class="bi bi-arrow-left"></i> Powrót do dokumentu
           </a>
           {% endif %}
-          
+
           <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-outline-primary">
             <i class="bi bi-download"></i> Pobierz obraz
           </a>
-          
+
           <!-- Przycisk uruchamiania OCR -->
           {% if doc.ocr_status != 'running' %}
           <form action="{{ url_for('document_run_ocr', doc_id=doc.id) }}" method="post" class="d-inline">
@@ -46,15 +46,15 @@
         <div class="card-body p-0 position-relative">
           <div id="imageContainer" style="height: 800px; position: relative; overflow: auto; display: flex; justify-content: center; align-items: center;">
             <div id="imageWrapper" style="position: relative; display: inline-block;">
-              <img id="mainImage" src="{{ url_for('document_preview', doc_id=doc.id) }}" 
-                   alt="{{ doc.original_filename }}" 
+              <img id="mainImage" src="{{ url_for('document_preview', doc_id=doc.id) }}"
+                   alt="{{ doc.original_filename }}"
                    style="display: block; max-width: 100%; height: auto; cursor: crosshair;">
               <div id="selectionOverlay" style="position: absolute; top: 0; left: 0; border: 2px dashed #007bff; background-color: rgba(0, 123, 255, 0.2); display: none; pointer-events: none;"></div>
             </div>
           </div>
-          
+
           <!-- Loader dla procesu OCR -->
-          <div id="ocrLoader" class="position-absolute top-0 start-0 w-100 h-100 d-none" 
+          <div id="ocrLoader" class="position-absolute top-0 start-0 w-100 h-100 d-none"
                style="background: rgba(255,255,255,0.8); z-index: 100; display: flex; align-items: center; justify-content: center;">
             <div class="text-center">
               <div class="spinner-border text-primary mb-2" role="status">
@@ -87,15 +87,15 @@
                 <button id="saveChangesBtn" class="btn btn-sm btn-outline-success d-none" onclick="saveCurrentText()">
                   <i class="bi bi-save"></i> Zapisz zmiany
                 </button>
-                <button id="copyFullBtn" class="btn btn-sm btn-outline-secondary">
+                <button id="copyFullBtn" class="btn btn-sm btn-outline-secondary" data-copy-target="#textDisplay">
                   <i class="bi bi-clipboard"></i> Kopiuj całość
                 </button>
               </div>
             </div>
-            
+
             <!-- Wyświetlacz tekstu (tylko do odczytu) -->
             <div id="textDisplay" class="border rounded p-2" style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; background-color: #f8f9fa; cursor: text; min-height: 100px;"></div>
-            
+
             <!-- Edytor tekstu (ukryty domyślnie) -->
             <div id="textEditor" class="d-none">
               <textarea id="textEditArea" class="form-control" rows="20" style="font-family: 'Courier New', monospace; resize: vertical; min-height: 300px;"></textarea>
@@ -114,9 +114,6 @@
                 </div>
               </div>
             </div>
-            
-            <!-- Niewidoczny element textarea do kopiowania -->
-            <textarea id="copyFullArea" style="position: absolute; left: -9999px;"></textarea>
           </div>
         </div>
       </div>
@@ -146,7 +143,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" onclick="copyFragmentText()">
+        <button id="copyFragmentBtn" type="button" class="btn btn-outline-secondary" data-copy-target="#fragmentTextContent">
           <i class="bi bi-clipboard"></i> Kopiuj tekst
         </button>
         <button type="button" class="btn btn-primary" onclick="addToFullText()">
@@ -168,9 +165,7 @@
     var imageWrapper = document.getElementById('imageWrapper');
     var mainImage = document.getElementById('mainImage');
     var selectionOverlay = document.getElementById('selectionOverlay');
-    var copyFullBtn = document.getElementById('copyFullBtn');
     var ocrLoader = document.getElementById('ocrLoader');
-    var copyFullArea = document.getElementById('copyFullArea');
 
     // Zmienne pomocnicze
     var isSelecting = false;
@@ -178,7 +173,7 @@
     var docId = {{ doc.id }};
     var currentFullImageOcr = null;
     var documentHasFullOcr = {{ 'true' if doc.ocr_status == 'done' else 'false' }};
-    
+
     // Zmienne dla trybu edycji
     let isEditMode = false;
     let originalTextBeforeEdit = '';
@@ -187,7 +182,7 @@
 
     // Główny element do wyświetlania tekstu
     let fullImageText = document.getElementById('textDisplay');
-    
+
     // Funkcja sprawdzająca czy obraz został załadowany
     function waitForImageLoad() {
       if (mainImage.complete && mainImage.naturalHeight !== 0) {
@@ -240,7 +235,7 @@
         '<span class="visually-hidden">Ładowanie...</span>' +
         '</div>' +
         '</div>';
-      
+
       // Najpierw spróbuj zsynchronizować z serwerem
       syncWithServer().then(hasServerText => {
         if (!hasServerText) {
@@ -260,7 +255,7 @@
         page: 1,
         x1: 0, y1: 0, x2: 1, y2: 1  // Cały obraz
       };
-      
+
       // Wyślij zapytanie do API
       fetch('/api/document/' + docId + '/ocr-selection', {
         method: 'POST',
@@ -296,17 +291,17 @@
       try {
         const response = await fetch(`/api/document/${docId}/ocr-text`);
         const result = await response.json();
-        
+
         if (result.success && result.has_ocr) {
           // Jeśli serwer ma tekst OCR, użyj go zamiast ponownego generowania
           currentFullImageOcr = result.text;
           updateDisplayText(result.text);
-          
+
           // Pokaż info o synchronizacji (tylko jeśli tekst był już wyświetlany)
           if (fullImageText.textContent.trim()) {
             showSyncInfo();
           }
-          
+
           return true; // Oznacza że znaleziono tekst na serwerze
         }
         return false; // Brak tekstu na serwerze
@@ -319,11 +314,11 @@
     // Funkcja do przeliczania współrzędnych z CSS na względne (0-1)
     function calculateRelativeCoordinates(clientX, clientY) {
       var rect = mainImage.getBoundingClientRect();
-      
+
       // Oblicz współrzędne kliknięcia względem obrazu
       var imageX = clientX - rect.left;
       var imageY = clientY - rect.top;
-      
+
       // Zwróć znormalizowane współrzędne (0-1)
       return {
         x: Math.max(0, Math.min(1, imageX / rect.width)),
@@ -336,32 +331,32 @@
       e.preventDefault();
       // Rozpocznij zaznaczanie
       isSelecting = true;
-      
+
       // Pobierz pozycję kliknięcia względem obrazu
       var coords = calculateRelativeCoordinates(e.clientX, e.clientY);
       var rect = mainImage.getBoundingClientRect();
       startX = coords.x * rect.width;
       startY = coords.y * rect.height;
-      
+
       // Ukryj poprzednie zaznaczenie
       hideSelection();
     });
 
     imageWrapper.addEventListener('mousemove', function(e) {
       if (!isSelecting) return;
-      
+
       // Pobierz aktualną pozycję kursora
       var coords = calculateRelativeCoordinates(e.clientX, e.clientY);
       var rect = mainImage.getBoundingClientRect();
       endX = coords.x * rect.width;
       endY = coords.y * rect.height;
-      
+
       // Oblicz wymiary prostokąta zaznaczenia
       var left = Math.min(startX, endX);
       var top = Math.min(startY, endY);
       var width = Math.abs(endX - startX);
       var height = Math.abs(endY - startY);
-      
+
       // Pokaż zaznaczenie
       selectionOverlay.style.left = left + 'px';
       selectionOverlay.style.top = top + 'px';
@@ -372,33 +367,33 @@
 
     imageWrapper.addEventListener('mouseup', function(e) {
       if (!isSelecting) return;
-      
+
       // Zakończ zaznaczanie
       isSelecting = false;
-      
+
       // Pobierz ostateczną pozycję kursora
       var coords = calculateRelativeCoordinates(e.clientX, e.clientY);
       var rect = mainImage.getBoundingClientRect();
       endX = coords.x * rect.width;
       endY = coords.y * rect.height;
-      
+
       // Jeśli zaznaczenie jest zbyt małe, ignoruj je
       if (Math.abs(endX - startX) < 10 || Math.abs(endY - startY) < 10) {
         hideSelection();
         return;
       }
-      
+
       // Oblicz współrzędne normalizowane (0-1)
       var rectImage = mainImage.getBoundingClientRect();
       var normX1 = Math.min(startX, endX) / rectImage.width;
       var normY1 = Math.min(startY, endY) / rectImage.height;
       var normX2 = Math.max(startX, endX) / rectImage.width;
       var normY2 = Math.max(startY, endY) / rectImage.height;
-      
+
       console.log("Współrzędne zaznaczenia (0-1):", {
         x1: normX1, y1: normY1, x2: normX2, y2: normY2
       });
-      
+
       // Pobierz OCR dla zaznaczonego fragmentu
       getSelectionOcr(normX1, normY1, normX2, normY2);
     });
@@ -407,17 +402,17 @@
     function getSelectionOcr(x1, y1, x2, y2) {
       // Pokaż loader
       ocrLoader.classList.remove('d-none');
-      
+
       // Przygotuj dane do wysłania
       var data = {
         page: 1, // Obrazy mają zawsze 1 "stronę"
-        x1: x1, 
-        y1: y1, 
-        x2: x2, 
+        x1: x1,
+        y1: y1,
+        x2: x2,
         y2: y2,
         skip_pdf_embed: true // Nie osadzaj tekstu w PDF dla fragmentów
       };
-      
+
       // Wyślij zapytanie do API
       fetch('/api/document/' + docId + '/ocr-selection', {
         method: 'POST',
@@ -430,7 +425,7 @@
       .then(function(data) {
         // Ukryj loader
         ocrLoader.classList.add('d-none');
-        
+
         if (data.success) {
           // Wyświetl wynik w modalu
           showFragmentTextModal(data.text);
@@ -442,7 +437,7 @@
       .catch(function(error) {
         // Ukryj loader
         ocrLoader.classList.add('d-none');
-        
+
         // Pokaż błąd w modalu
         showFragmentTextModal('Błąd: ' + error.message);
       });
@@ -455,9 +450,180 @@
 
     // Funkcja wyświetlająca modal z tekstem fragmentu
     function showFragmentTextModal(text) {
-      document.getElementById('fragmentTextContent').textContent = text;
-      var modal = new bootstrap.Modal(document.getElementById('fragmentTextModal'));
+      const fragmentTextElement = document.getElementById('fragmentTextContent');
+      const modalElement = document.getElementById('fragmentTextModal');
+
+      // Jeśli element nie istnieje, spróbuj odtworzyć strukturę modala
+      if (!fragmentTextElement || !modalElement) {
+        console.warn('Elementy modala nie istnieją, próbuję odtworzyć...');
+        restoreModalContent();
+      }
+
+      // Sprawdź ponownie po próbie odtworzenia
+      const fragmentTextElementNew = document.getElementById('fragmentTextContent');
+      const modalElementNew = document.getElementById('fragmentTextModal');
+
+      if (!fragmentTextElementNew) {
+        console.error('Element fragmentTextContent nie został znaleziony nawet po odtworzeniu');
+        alert('Błąd interfejsu: nie można wyświetlić modala z tekstem');
+        return;
+      }
+
+      if (!modalElementNew) {
+        console.error('Element fragmentTextModal nie został znaleziony');
+        alert('Błąd interfejsu: nie można wyświetlić modala');
+        return;
+      }
+
+      fragmentTextElementNew.textContent = text;
+
+      // Ustaw dedykowany event listener dla przycisku kopiowania
+      setupModalCopyButton();
+
+      const modal = new bootstrap.Modal(modalElementNew);
       modal.show();
+    }
+
+    // Funkcja konfigurująca przycisk kopiowania w modalu
+    function setupModalCopyButton() {
+      const copyBtn = document.getElementById('copyFragmentBtn');
+      if (!copyBtn) {
+        console.warn('Przycisk copyFragmentBtn nie został znaleziony');
+        return;
+      }
+
+      // Usuń wszystkie poprzednie event listenery jeśli istnieją
+      copyBtn.removeEventListener('click', handleModalCopyClick, { capture: true });
+      copyBtn.removeEventListener('click', handleModalCopyClick);
+      copyBtn.removeEventListener('click', handleModalCopyClickBackup);
+
+      // Dodaj nowe event listenery
+      copyBtn.addEventListener('click', handleModalCopyClick, { capture: true });
+      copyBtn.addEventListener('click', handleModalCopyClickBackup);
+
+      console.log('Skonfigurowano przyciski kopiowania dla modala');
+    }
+
+    // Handler dla kopiowania tekstu z modala
+    async function handleModalCopyClick(e) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      console.log('Dedykowany handler modala - kopiowanie tekstu');
+
+      const btn = e.currentTarget;
+      const targetSelector = btn.getAttribute('data-copy-target');
+
+      if (!targetSelector) {
+        console.error('Brak atrybutu data-copy-target na przycisku');
+        alert('Błąd konfiguracji: nie można określić tekstu do skopiowania');
+        return;
+      }
+
+      const targetEl = document.querySelector(targetSelector);
+      if (!targetEl) {
+        console.error('Nie znaleziono elementu do skopiowania:', targetSelector);
+
+        // Spróbuj odtworzyć modal i spróbuj ponownie
+        restoreModalContent();
+        const targetElNew = document.querySelector(targetSelector);
+        if (!targetElNew) {
+          alert('Błąd: nie można znaleźć tekstu do skopiowania');
+          return;
+        }
+      }
+
+      try {
+        const textToCopy = (targetEl || document.querySelector(targetSelector)).innerText ||
+                          (targetEl || document.querySelector(targetSelector)).textContent || '';
+
+        if (!textToCopy.trim()) {
+          alert('Brak tekstu do skopiowania');
+          return;
+        }
+
+        console.log('Kopiowanie tekstu:', textToCopy.substring(0, 50) + '...');
+
+        // Użyj agresywnej metody kopiowania dla modali
+        await window.copyTextToClipboardAggressive(textToCopy, () => {
+          window.flashCopied(btn);
+        });
+
+        console.log('Tekst skopiowany pomyślnie (dedykowany handler)');
+
+      } catch (error) {
+        console.error('Błąd kopiowania tekstu z modala:', error);
+        alert('Nie udało się skopiować tekstu do schowka: ' + error.message);
+      }
+    }
+
+    // Backup handler - w przypadku gdyby główny nie zadziałał
+    async function handleModalCopyClickBackup(e) {
+      // Sprawdź czy główny handler już obsłużył to zdarzenie
+      if (e.defaultPrevented) {
+        console.log('Backup handler - zdarzenie już obsłużone');
+        return;
+      }
+
+      console.log('Backup handler - próba kopiowania');
+
+      // Daj chwilę głównemu handlerowi
+      setTimeout(async () => {
+        if (e.defaultPrevented) return;
+
+        console.log('Backup handler aktywny - kopiowanie tekstu');
+
+        const btn = e.currentTarget;
+        const targetSelector = btn.getAttribute('data-copy-target');
+        const targetEl = document.querySelector(targetSelector);
+
+        if (targetEl) {
+          try {
+            const textToCopy = targetEl.innerText || targetEl.textContent || '';
+            if (textToCopy.trim()) {
+              // Użyj agresywnej metody też w backup handlerze
+              await window.copyTextToClipboardAggressive(textToCopy, () => {
+                window.flashCopied(btn);
+              });
+              console.log('Backup handler - kopiowanie zakończone pomyślnie');
+            }
+          } catch (error) {
+            console.error('Backup handler - błąd:', error);
+          }
+        }
+      }, 100);
+    }
+
+    // Funkcja odtwarzająca oryginalną zawartość modala
+    function restoreModalContent() {
+      const modalElement = document.getElementById('fragmentTextModal');
+      if (!modalElement) return;
+
+      const modalBody = modalElement.querySelector('.modal-body');
+      if (!modalBody) return;
+
+      // Sprawdź czy element fragmentTextContent już istnieje
+      if (modalBody.querySelector('#fragmentTextContent')) {
+        // Już istnieje, tylko upewnij się że przycisk kopiowania działa
+        setupModalCopyButton();
+        return;
+      }
+
+      // Odtwórz oryginalną zawartość
+      modalBody.innerHTML = `
+        <div class="alert alert-info">
+          <i class="bi bi-info-circle me-2"></i>
+          <strong>Tekst rozpoznany z zaznaczonego fragmentu:</strong>
+        </div>
+        <div class="card bg-light">
+          <div class="card-body">
+            <pre id="fragmentTextContent" class="mb-0" style="white-space: pre-wrap; max-height: 400px; overflow-y: auto;"></pre>
+          </div>
+        </div>
+      `;
+
+      // Skonfiguruj przycisk kopiowania po odtworzeniu
+      setTimeout(() => setupModalCopyButton(), 100);
     }
 
     // Funkcje do obsługi edycji tekstu
@@ -466,25 +632,37 @@
       const textEditor = document.getElementById('textEditor');
       const textEditArea = document.getElementById('textEditArea');
       const toggleBtn = document.getElementById('toggleEditMode');
-      
+
+      // Walidacja elementów
+      if (!textDisplay || !textEditor || !textEditArea || !toggleBtn) {
+        console.error('Nie można znaleźć elementów interfejsu edycji:', {
+          textDisplay: !!textDisplay,
+          textEditor: !!textEditor,
+          textEditArea: !!textEditArea,
+          toggleBtn: !!toggleBtn
+        });
+        alert('Błąd interfejsu: nie można przełączyć trybu edycji');
+        return;
+      }
+
       if (!isEditMode) {
         // Przejdź do trybu edycji
         const currentText = textDisplay.textContent || '';
         originalTextBeforeEdit = currentText;
-        
+
         textEditArea.value = currentText;
         textDisplay.classList.add('d-none');
         textEditor.classList.remove('d-none');
-        
+
         toggleBtn.innerHTML = '<i class="bi bi-eye"></i> Podgląd';
         toggleBtn.classList.remove('btn-outline-info');
         toggleBtn.classList.add('btn-outline-warning');
-        
+
         isEditMode = true;
-        
+
         // Focus na pole tekstowe
         textEditArea.focus();
-        
+
       } else {
         // Przejdź do trybu podglądu
         exitEditMode(false); // false = nie zapisuj automatycznie
@@ -496,53 +674,38 @@
       const textEditor = document.getElementById('textEditor');
       const textEditArea = document.getElementById('textEditArea');
       const toggleBtn = document.getElementById('toggleEditMode');
-      
+
+      // Walidacja elementów
+      if (!textDisplay || !textEditor || !textEditArea || !toggleBtn) {
+        console.error('Nie można znaleźć elementów interfejsu edycji podczas wyjścia');
+        return;
+      }
+
       if (autoSave) {
         // Zaktualizuj wyświetlany tekst
         const editedText = textEditArea.value;
         updateDisplayText(editedText);
       }
-      
+
       textDisplay.classList.remove('d-none');
       textEditor.classList.add('d-none');
-      
+
       toggleBtn.innerHTML = '<i class="bi bi-pencil"></i> Edytuj';
       toggleBtn.classList.remove('btn-outline-warning');
       toggleBtn.classList.add('btn-outline-info');
-      
+
       isEditMode = false;
     }
 
     function updateDisplayText(text) {
       const textDisplay = document.getElementById('textDisplay');
-      const copyArea = document.getElementById('copyFullArea');
-      
+
       // Aktualizuj wyświetlacz
       textDisplay.textContent = text;
-      copyArea.value = text;
-      
+
       // Ustaw oryginalny tekst dla monitorowania zmian
       originalText = text;
     }
-
-    // Obsługa kopiowania pełnego tekstu obrazu
-    copyFullBtn.addEventListener('click', function() {
-      var textToCopy = fullImageText.textContent.trim();
-      
-      copyTextToClipboard(textToCopy, function() {
-        // Zmień wygląd przycisku na chwilę
-        var originalText = copyFullBtn.innerHTML;
-        copyFullBtn.innerHTML = '<i class="bi bi-check2"></i> Skopiowano!';
-        copyFullBtn.classList.add('btn-success');
-        copyFullBtn.classList.remove('btn-outline-secondary');
-        
-        setTimeout(function() {
-          copyFullBtn.innerHTML = originalText;
-          copyFullBtn.classList.remove('btn-success');
-          copyFullBtn.classList.add('btn-outline-secondary');
-        }, 2000);
-      });
-    });
 
     // Obsługa zmiany rozmiaru okna
     window.addEventListener('resize', function() {
@@ -570,8 +733,8 @@
         }
       } else {
         // E = przejdź do edycji (gdy nie jesteś w polu input)
-        if (e.key === 'e' && !e.ctrlKey && !e.altKey && 
-            document.activeElement.tagName !== 'INPUT' && 
+        if (e.key === 'e' && !e.ctrlKey && !e.altKey &&
+            document.activeElement.tagName !== 'INPUT' &&
             document.activeElement.tagName !== 'TEXTAREA') {
           e.preventDefault();
           toggleEditMode();
@@ -583,12 +746,14 @@
     const toggleBtn = document.getElementById('toggleEditMode');
     if (toggleBtn) {
       toggleBtn.addEventListener('click', toggleEditMode);
+    } else {
+      console.warn('Przycisk toggleEditMode nie został znaleziony - nie można dodać event listenera');
     }
 
     // Ustaw monitorowanie zmian tekstu
     function setupTextChangeMonitoring() {
       const textDisplay = document.getElementById('textDisplay');
-      
+
       if (textDisplay) {
         // Obserwuj zmiany w tekście (używaj MutationObserver dla textContent)
         const observer = new MutationObserver(function(mutations) {
@@ -598,7 +763,7 @@
             }
           });
         });
-        
+
         observer.observe(textDisplay, {
           childList: true,
           subtree: true,
@@ -611,7 +776,7 @@
       const textDisplay = document.getElementById('textDisplay');
       const currentText = textDisplay.textContent;
       const saveBtn = document.getElementById('saveChangesBtn');
-      
+
       if (currentText !== originalText) {
         if (!textChanged) {
           textChanged = true;
@@ -631,20 +796,34 @@
 
     // Globalne funkcje
     window.cancelEdit = function() {
+      const textEditArea = document.getElementById('textEditArea');
+      if (!textEditArea) {
+        console.error('Element textEditArea nie został znaleziony');
+        alert('Błąd interfejsu: nie można anulować edycji');
+        return;
+      }
+
       // Przywróć oryginalny tekst
-      document.getElementById('textEditArea').value = originalTextBeforeEdit;
+      textEditArea.value = originalTextBeforeEdit;
       exitEditMode(false);
     };
 
     window.saveEdit = function() {
-      const editedText = document.getElementById('textEditArea').value;
-      
+      const textEditArea = document.getElementById('textEditArea');
+      if (!textEditArea) {
+        console.error('Element textEditArea nie został znaleziony');
+        alert('Błąd interfejsu: nie można zapisać edycji');
+        return;
+      }
+
+      const editedText = textEditArea.value;
+
       // Sprawdź czy tekst się zmienił
       if (editedText !== originalTextBeforeEdit) {
         updateDisplayText(editedText);
         checkForTextChanges(); // Pokaż przycisk "Zapisz zmiany"
       }
-      
+
       exitEditMode(true);
     };
 
@@ -652,101 +831,51 @@
     window.saveCurrentText = async function() {
       const textDisplay = document.getElementById('textDisplay');
       const currentText = textDisplay.textContent;
-      
+
       try {
         const formData = new FormData();
         formData.append('text_content', currentText);
-        
+
         const response = await fetch(`/api/document/${docId}/update-ocr-text`, {
           method: 'POST',
           body: formData
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
           originalText = currentText;
           textChanged = false;
           document.getElementById('saveChangesBtn').classList.add('d-none');
           textDisplay.style.backgroundColor = '#f8f9fa';
           textDisplay.style.border = '';
-          
+
           showSuccessAlert('Zmiany zostały zapisane', 'success', result.ocr_doc_id);
         } else {
           showErrorAlert('Nie udało się zapisać zmian: ' + (result.error || 'Nieznany błąd'));
         }
-        
+
       } catch (error) {
         showErrorAlert('Błąd podczas zapisywania: ' + error.message);
       }
     };
 
-    // Funkcja pomocnicza do kopiowania tekstu
-    function copyTextToClipboard(text, successCallback) {
-      // Metoda 1: Użyj Clipboard API
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text)
-          .then(successCallback)
-          .catch(function(error) {
-            console.error('Błąd kopiowania przez Clipboard API:', error);
-            // Metoda 2: Fallback - użyj elementu textarea
-            fallbackCopyTextToClipboard(text, successCallback);
-          });
-      } else {
-        // Brak dostępu do Clipboard API, użyj fallbacku
-        fallbackCopyTextToClipboard(text, successCallback);
-      }
-    }
-
-    // Funkcja pomocnicza - fallback dla starszych przeglądarek
-    function fallbackCopyTextToClipboard(text, successCallback) {
-      try {
-        // Utwórz tymczasowy element textarea
-        var textarea = document.createElement('textarea');
-        textarea.value = text;
-        
-        // Ustaw styl, aby element był niewidoczny
-        textarea.style.position = 'fixed';
-        textarea.style.left = '-9999px';
-        textarea.style.top = '0';
-        
-        // Dodaj do DOM, zaznacz tekst i skopiuj
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        
-        // Wykonaj polecenie kopiowania
-        var successful = document.execCommand('copy');
-        
-        // Usuń tymczasowy element
-        document.body.removeChild(textarea);
-        
-        if (successful) {
-          successCallback();
-        } else {
-          console.error('Kopiowanie nie powiodło się');
-        }
-      } catch (error) {
-        console.error('Błąd podczas fallbackowego kopiowania:', error);
-      }
-    }
-
     // Ulepszona funkcja showSuccessAlert z linkami powrotu
     function showSuccessAlert(message, type = 'success', ocrDocId = null) {
       const alertClass = type === 'success' ? 'alert-success' : 'alert-info';
       const iconClass = type === 'success' ? 'bi-check-circle' : 'bi-info-circle';
-      
+
       // Przygotuj linki powrotu
       let returnLinks = '';
       {% if doc.parent_id %}
         // Dokument należy do opinii
         returnLinks = `
           <div class="mt-2">
-            <a href="{{ url_for('opinion_detail', doc_id=doc.parent_id) }}?ocr_updated=true&ocr_doc_id=${ocrDocId || ''}" 
+            <a href="{{ url_for('opinion_detail', doc_id=doc.parent_id) }}?ocr_updated=true&ocr_doc_id=${ocrDocId || ''}"
                class="btn btn-sm btn-outline-dark me-2">
               <i class="bi bi-arrow-left"></i> Powrót do opinii
             </a>
-            <a href="{{ url_for('document_detail', doc_id=doc.id) }}?ocr_updated=true&ocr_doc_id=${ocrDocId || ''}" 
+            <a href="{{ url_for('document_detail', doc_id=doc.id) }}?ocr_updated=true&ocr_doc_id=${ocrDocId || ''}"
                class="btn btn-sm btn-outline-dark">
               <i class="bi bi-file-earmark"></i> Widok dokumentu
             </a>
@@ -756,18 +885,18 @@
         // Dokument samodzielny
         returnLinks = `
           <div class="mt-2">
-            <a href="{{ url_for('document_detail', doc_id=doc.id) }}?ocr_updated=true&ocr_doc_id=${ocrDocId || ''}" 
+            <a href="{{ url_for('document_detail', doc_id=doc.id) }}?ocr_updated=true&ocr_doc_id=${ocrDocId || ''}"
                class="btn btn-sm btn-outline-dark me-2">
               <i class="bi bi-arrow-left"></i> Widok dokumentu
             </a>
-            <a href="{{ url_for('list_documents') }}" 
+            <a href="{{ url_for('list_documents') }}"
                class="btn btn-sm btn-outline-dark">
               <i class="bi bi-files"></i> Lista dokumentów
             </a>
           </div>
         `;
       {% endif %}
-      
+
       const alert = document.createElement('div');
       alert.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
       alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 350px; max-width: 450px;';
@@ -783,7 +912,7 @@
         </div>
       `;
       document.body.appendChild(alert);
-      
+
       // Usuń po 10 sekundach (dłużej dla ważnych komunikatów)
       setTimeout(() => {
         if (alert.parentNode) {
@@ -801,7 +930,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
       `;
       document.body.appendChild(alert);
-      
+
       // Usuń po 7 sekund (błędy trzymamy dłużej)
       setTimeout(() => {
         if (alert.parentNode) {
@@ -821,7 +950,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
       `;
       document.body.appendChild(alert);
-      
+
       setTimeout(() => {
         if (alert.parentNode) {
           alert.remove();
@@ -831,9 +960,29 @@
 
     // Zaktualizowana funkcja addToFullText
     window.addToFullText = async function() {
-      const fragmentText = document.getElementById('fragmentTextContent').textContent;
+      const fragmentTextElement = document.getElementById('fragmentTextContent');
+      const modalElement = document.getElementById('fragmentTextModal');
+
+      if (!fragmentTextElement) {
+        console.error('Element fragmentTextContent nie został znaleziony');
+        // Spróbuj odtworzyć zawartość modala
+        restoreModalContent();
+        const fragmentTextElementNew = document.getElementById('fragmentTextContent');
+        if (!fragmentTextElementNew) {
+          alert('Błąd interfejsu: nie można pobrać tekstu fragmentu');
+          return;
+        }
+      }
+
+      if (!modalElement) {
+        console.error('Modal fragmentTextModal nie został znaleziony');
+        alert('Błąd interfejsu: nie można znaleźć modala');
+        return;
+      }
+
+      const fragmentText = (fragmentTextElement || document.getElementById('fragmentTextContent')).textContent;
       const currentFullText = fullImageText.textContent;
-      
+
       // Przygotuj nowy tekst - dodaj fragment do istniejącego
       let newFullText;
       if (currentFullText && currentFullText.trim() && currentFullText.indexOf('Brak pełnego OCR') === -1) {
@@ -841,12 +990,39 @@
       } else {
         newFullText = fragmentText;
       }
-      
-      // Wyświetl loader
-      const modal = bootstrap.Modal.getInstance(document.getElementById('fragmentTextModal'));
-      const modalBody = modal._element.querySelector('.modal-body');
+
+      // Pobierz lub utwórz instancję modala
+      let modal = bootstrap.Modal.getInstance(modalElement);
+      if (!modal) {
+        modal = new bootstrap.Modal(modalElement);
+      }
+
+      const modalBody = modalElement.querySelector('.modal-body');
+      if (!modalBody) {
+        console.error('Nie można znaleźć .modal-body w modalu');
+        alert('Błąd interfejsu: nieprawidłowa struktura modala');
+        return;
+      }
+
       const originalContent = modalBody.innerHTML;
-      
+
+      // Funkcja przywracająca zawartość w każdym przypadku
+      const restoreContent = () => {
+        if (modalBody) {
+          modalBody.innerHTML = originalContent;
+          // Przywróć również funkcjonalność kopiowania
+          setTimeout(() => setupModalCopyButton(), 100);
+        }
+      };
+
+      // Dodaj event listener na zamknięcie modala aby przywrócić zawartość
+      const handleModalHidden = () => {
+        restoreContent();
+        modalElement.removeEventListener('hidden.bs.modal', handleModalHidden);
+      };
+      modalElement.addEventListener('hidden.bs.modal', handleModalHidden);
+
+      // Wyświetl loader
       modalBody.innerHTML = `
         <div class="d-flex justify-content-center align-items-center py-4">
           <div class="spinner-border text-primary me-3" role="status">
@@ -855,66 +1031,56 @@
           <span>Zapisywanie tekstu do serwera...</span>
         </div>
       `;
-      
+
       try {
         // Wyślij tekst do serwera
         const formData = new FormData();
         formData.append('text_content', newFullText);
-        
+
         const response = await fetch(`/api/document/${docId}/update-ocr-text`, {
           method: 'POST',
           body: formData
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
           // Aktualizuj lokalny tekst
           updateDisplayText(newFullText);
-          
+
           // Zapisz aktualny OCR w zmiennej globalnej
           currentFullImageOcr = newFullText;
-          
+
+          // Usuń event listener (już nie potrzebny)
+          modalElement.removeEventListener('hidden.bs.modal', handleModalHidden);
+
           // Zamknij modal
           modal.hide();
-          
+
           // Pokaż komunikat o powodzeniu z linkami
           showSuccessAlert(result.message, result.action === 'created' ? 'success' : 'info', result.ocr_doc_id);
-          
+
         } else {
           // Przywróć zawartość modalu i pokaż błąd
-          modalBody.innerHTML = originalContent;
+          restoreContent();
           showErrorAlert('Nie udało się zapisać tekstu: ' + (result.error || 'Nieznany błąd'));
         }
-        
+
       } catch (error) {
         // Przywróć zawartość modalu i pokaż błąd
-        modalBody.innerHTML = originalContent;
+        restoreContent();
         showErrorAlert('Błąd komunikacji z serwerem: ' + error.message);
       }
     };
 
-    // Globalne funkcje dla modala
-    window.copyFragmentText = function() {
-      const text = document.getElementById('fragmentTextContent').textContent;
-      copyTextToClipboard(text, function() {
-        // Pokaż potwierdzenie
-        const button = event.target;
-        const originalText = button.innerHTML;
-        button.innerHTML = '<i class="bi bi-check2"></i> Skopiowano!';
-        button.classList.add('btn-success');
-        button.classList.remove('btn-outline-secondary');
-        
-        setTimeout(() => {
-          button.innerHTML = originalText;
-          button.classList.remove('btn-success');
-          button.classList.add('btn-outline-secondary');
-        }, 2000);
-      });
-    };
-
     // Inicjalizacja po załadowaniu obrazu
     waitForImageLoad();
+
+    // Upewnij się, że modal jest w prawidłowym stanie
+    restoreModalContent();
+
+    // Skonfiguruj przycisk kopiowania w modalu
+    setupModalCopyButton();
   });
 </script>
 

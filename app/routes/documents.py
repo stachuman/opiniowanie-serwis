@@ -8,10 +8,11 @@ from fastapi.responses import RedirectResponse, FileResponse, StreamingResponse
 from sqlmodel import Session, select
 from datetime import datetime
 
+from app.navigation import build_document_navigation, PageActionsBuilder
 from app.db import engine, FILES_DIR, BASE_DIR
 from app.models import Document
 from app.search import is_fuzzy_match
-from app.text_extraction import get_document_text_content, get_text_preview
+from app.text_extraction import get_document_text_content, get_text_preview, HAS_DOCX
 from app.document_utils import STEP_ICON, detect_mime_type
 
 from app.llm_service import llm_service, get_default_instruction, combine_note_with_summary
@@ -25,20 +26,46 @@ def document_summarize_form(request: Request, doc_id: int):
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
-        
+
         # Sprawdź czy istnieje wynik OCR
         ocr_txt_query = select(Document).where(
             Document.ocr_parent_id == doc_id,
             Document.doc_type == "OCR TXT"
         )
         ocr_txt = session.exec(ocr_txt_query).first()
-        
+
         if not ocr_txt:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail="Brak tekstu do podsumowania. Najpierw wykonaj OCR dokumentu."
             )
-        
+
+        # Pobierz opinię nadrzędną jeśli istnieje
+        parent_opinion = None
+        if doc.parent_id:
+            parent_opinion = session.get(Document, doc.parent_id)
+
+        # NOWE: Zbuduj nawigację
+        from app.navigation import BreadcrumbBuilder
+
+        breadcrumbs = BreadcrumbBuilder(request)
+
+        if parent_opinion:
+            # Dokument należy do opinii
+            breadcrumbs.add_home().add_opinion(parent_opinion).add_document(doc)
+        else:
+            # Dokument samodzielny
+            breadcrumbs.add_documents().add_document(doc)
+
+        breadcrumbs.add_current("Podsumowanie", "robot")
+
+        navigation = {
+            'breadcrumbs': breadcrumbs.build(),
+            'page_title': f"Podsumowanie dokumentu",
+            'page_actions': [],
+            'context_info': []
+        }
+
         # WAŻNE: Pobierz wszystkie potrzebne dane przed zamknięciem sesji
         doc_data = {
             "id": doc.id,
@@ -50,20 +77,20 @@ def document_summarize_form(request: Request, doc_id: int):
             "note": doc.note,
             "parent_id": doc.parent_id
         }
-    
+
     from fastapi.templating import Jinja2Templates
     templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-    
-    return templates.TemplateResponse(
-        "document_summarize.html",
-        {
-            "request": request,
-            "doc": doc_data,  # Używaj dict zamiast obiektu doc
-            "default_instruction": get_default_instruction(),
-            "current_note": doc_data["note"] or "",
-            "title": f"Podsumowanie dokumentu: {doc_data['original_filename']}"
-        }
-    )
+
+    context = {
+        "request": request,
+        "doc": doc_data,  # Używaj dict zamiast obiektu doc
+        "default_instruction": get_default_instruction(),
+        "current_note": doc_data["note"] or "",
+        "current_year": datetime.now().year,  # Dodaj rok
+        **navigation
+    }
+
+    return templates.TemplateResponse("document_summarize.html", context)
 
 @router.post("/document/{doc_id}/quick-summarize/stream")
 async def document_quick_summarize_stream(
@@ -316,10 +343,11 @@ def update_document_note(request: Request, doc_id: int, note: str = Form("")):
         # W przeciwnym razie wróć do szczegółów dokumentu
         return RedirectResponse(request.url_for("document_detail", doc_id=doc_id), status_code=303)
 
+
 @router.get("/documents", name="list_documents")
 def list_documents(request: Request,
                    k1: bool | None = None,
-                   k2: bool | None = None, 
+                   k2: bool | None = None,
                    k3: bool | None = None,
                    k4: bool | None = None,
                    search: str | None = None,
@@ -327,142 +355,126 @@ def list_documents(request: Request,
                    fuzzy_search: bool = False,
                    doc_type_filter: str | None = None):
     """Lista wszystkich dokumentów z filtrowaniem i wyszukiwaniem."""
-    from app.text_extraction import HAS_DOCX
-    
+
     with Session(engine) as session:
-        # Rozpocznij z podstawowym zapytaniem
+        # Pobierz wszystkie dokumenty
         query = select(Document)
-        
-        # Przygotuj listę dozwolonych kroków - domyślnie wszystkie oprócz k4 (archiwum)
-        allowed_steps = []
-        
-        # Jeśli żadne parametry nie są ustawione, użyj domyślnych (wszystkie oprócz k4)
-        if k1 is None and k2 is None and k3 is None and k4 is None:
-            allowed_steps = ['k1', 'k2', 'k3']
-        else:
-            # Jeśli parametry są ustawione, dodaj tylko te które są True
-            if k1:
-                allowed_steps.append('k1')
-            if k2:
-                allowed_steps.append('k2')
-            if k3:
-                allowed_steps.append('k3')
-            if k4:
-                allowed_steps.append('k4')
-        
-        # Zastosuj filtr kroków jeśli są jakieś dozwolone
-        if allowed_steps:
-            query = query.where(Document.step.in_(allowed_steps))
-        
-        # Zastosuj filtr typu dokumentu
-        if doc_type_filter and doc_type_filter.strip() and doc_type_filter != "all":
-            if doc_type_filter == "opinions":
-                query = query.where(Document.is_main == True)
-            elif doc_type_filter == "attachments":
-                query = query.where(Document.is_main == False)
-            elif doc_type_filter == "pdf":
-                query = query.where(Document.mime_type == 'application/pdf')
-            elif doc_type_filter == "images":
-                query = query.where(Document.mime_type.like('image/%'))
-            elif doc_type_filter == "word":
-                query = query.where(Document.mime_type.like('%word%'))
-            elif doc_type_filter == "ocr_results":
-                query = query.where(Document.doc_type == "OCR TXT")
-        
-        # Wykonaj zapytanie z sortowaniem
-        all_docs = session.exec(query.order_by(Document.upload_time.desc())).all()
-        
-        # Słownik z informacjami o dopasowaniach (doc_id -> lista typów dopasowań)
+
+        # Zastosuj filtry statusów
+        status_filters = []
+        if k1 is not None and k1:
+            status_filters.append("k1")
+        if k2 is not None and k2:
+            status_filters.append("k2")
+        if k3 is not None and k3:
+            status_filters.append("k3")
+        if k4 is not None and k4:
+            status_filters.append("k4")
+
+        if status_filters:
+            query = query.where(Document.step.in_(status_filters))
+
+        # Filtr typu dokumentu
+        if doc_type_filter:
+            query = query.where(Document.doc_type == doc_type_filter)
+
+        docs = session.exec(query.order_by(Document.upload_time.desc())).all()
+
+        # Wyszukiwanie (zachowujemy istniejącą logikę)
         search_matches = {}
-        
-        # Zastosuj wyszukiwanie
         if search and search.strip():
-            search_term = search.strip().lower()
+            search_term = search.strip()
             filtered_docs = []
-            
-            for doc in all_docs:
-                # Lista typów dopasowań dla tego dokumentu
-                match_types = []
-                
-                # Standardowe wyszukiwanie w metadanych
-                metadata_match = (
-                    (doc.sygnatura and search_term in doc.sygnatura.lower()) or
-                    (doc.original_filename and search_term in doc.original_filename.lower()) or
-                    (doc.doc_type and search_term in doc.doc_type.lower())
-                )
-                
-                if metadata_match:
-                    match_types.append("metadata")
-                
-                # Wyszukiwanie rozmyte w metadanych (jeśli włączone)
-                fuzzy_metadata_match = False
-                if fuzzy_search and not metadata_match:
-                    metadata_text = f"{doc.sygnatura or ''} {doc.original_filename or ''} {doc.doc_type or ''}".lower()
-                    fuzzy_metadata_match = is_fuzzy_match(search_term, metadata_text)
-                    if fuzzy_metadata_match:
-                        match_types.append("fuzzy_metadata")
-                
-                # Wyszukiwanie w treści (jeśli włączone)
-                content_match = False
-                fuzzy_content_match = False
+
+            for doc in docs:
+                matches = []
+
+                # Wyszukiwanie w metadanych
+                searchable_text = ' '.join(filter(None, [
+                    doc.original_filename or '',
+                    doc.sygnatura or '',
+                    doc.doc_type or ''
+                ]))
+
+                if search_term.lower() in searchable_text.lower():
+                    matches.append('metadata')
+                elif fuzzy_search and is_fuzzy_match(search_term, searchable_text):
+                    matches.append('fuzzy_metadata')
+
+                # Wyszukiwanie w treści
                 if search_content:
-                    # Wyszukaj w treści dokumentu (przekaż sesję!)
-                    doc_text = get_document_text_content(doc, session)
-                    if doc_text:
-                        content_match = search_term in doc_text.lower()
-                        if content_match:
-                            match_types.append("content")
-                        elif fuzzy_search:
-                            fuzzy_content_match = is_fuzzy_match(search_term, doc_text.lower())
-                            if fuzzy_content_match:
-                                match_types.append("fuzzy_content")
-                
-                # Dodaj do wyników jeśli pasuje
-                if match_types:
-                    search_matches[doc.id] = match_types
+                    content_text = get_document_text_content(doc.id)
+                    if content_text:
+                        if search_term.lower() in content_text.lower():
+                            matches.append('content')
+                        elif fuzzy_search and is_fuzzy_match(search_term, content_text):
+                            matches.append('fuzzy_content')
+
+                if matches:
+                    search_matches[doc.id] = matches
                     filtered_docs.append(doc)
-            
+
             docs = filtered_docs
-        else:
-            docs = all_docs
-        
-        # Przygotuj dane o aktualnych filtrach do przekazania do szablonu
+
+        # Przygotuj dane filtrów
         current_filters = {
-            'k1': k1 if k1 is not None else (k1 is None),  # True jeśli nie określono lub jawnie True
+            'k1': k1 if k1 is not None else (k1 is None),
             'k2': k2 if k2 is not None else (k2 is None),
             'k3': k3 if k3 is not None else (k3 is None),
-            'k4': k4 if k4 is not None else False,  # False domyślnie dla archiwum
+            'k4': k4 if k4 is not None else (k4 is None),
             'search': search or '',
             'search_content': search_content,
             'fuzzy_search': fuzzy_search,
-            'doc_type_filter': doc_type_filter or 'all'
+            'doc_type_filter': doc_type_filter or ''
         }
-        
+
+        # Pobierz unikalne typy dokumentów dla filtra
+        unique_doc_types = list(set(filter(None, [doc.doc_type for doc in session.exec(select(Document)).all()])))
+        unique_doc_types.sort()
+
+        # NOWE: Zbuduj akcje strony
+        actions = (PageActionsBuilder(request)
+                   .add_primary("Szybki OCR",
+                                str(request.url_for('quick_ocr_form')),
+                                "lightning")
+                   .build())
+
+        # NOWE: Kompletny kontekst z nawigacją
+        context = {
+            "request": request,
+            "docs": docs,
+            "icons": STEP_ICON,
+            "title": "Wszystkie dokumenty",
+            "current_filters": current_filters,
+            "total_count": len(docs),
+            "search_matches": search_matches,
+            "unique_doc_types": unique_doc_types,
+            "has_docx": HAS_DOCX,
+            # NOWE: Elementy nawigacji
+            "page_title": "Wszystkie dokumenty",
+            "page_actions": actions,
+            "breadcrumbs": [],  # Lista dokumentów nie ma breadcrumbs
+            "context_info": []
+        }
+
         from fastapi.templating import Jinja2Templates
         templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-        
-        return templates.TemplateResponse(
-            "index.html", 
-            {
-                "request": request, 
-                "docs": docs, 
-                "icons": STEP_ICON, 
-                "title": "Dokumenty",
-                "current_filters": current_filters,
-                "total_count": len(docs),
-                "has_docx": HAS_DOCX,
-                "search_matches": search_matches
-            }
-        )
 
-@router.get("/document/{doc_id}", name="document_detail")
+        return templates.TemplateResponse("documents.html", context)
+
+@router.get("/document/{doc_id}")
 def document_detail(request: Request, doc_id: int):
     """Szczegóły dokumentu."""
     with Session(engine) as session:
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Nie ma takiego dokumentu")
-        
+
+        # Pobierz opinię nadrzędną jeśli istnieje
+        parent_opinion = None
+        if doc.parent_id:
+            parent_opinion = session.get(Document, doc.parent_id)
+
         # Sprawdź, czy istnieje wynik OCR (dokument TXT)
         ocr_txt = None
         if doc.ocr_status == "done":
@@ -471,33 +483,38 @@ def document_detail(request: Request, doc_id: int):
                 Document.doc_type == "OCR TXT"
             )
             ocr_txt = session.exec(ocr_txt_query).first()
-            
-    steps = [("k1", "k1 – Wywiad"),
-             ("k2", "k2 – Wyciąg z akt"),
-             ("k3", "k3 – Opinia"),
-             ("k4", "k4 – Archiwum")]
-             
-    # Przygotuj kontekst odpowiedzi
-    context = {
-        "request": request, 
-        "doc": doc, 
-        "ocr_txt": ocr_txt, 
-        "steps": steps, 
-        "title": f"Dokument #{doc.id}"
-    }
-    
-    # Jeśli dokument to plik tekstowy, dodaj pełny tekst
-    if doc.mime_type == "text/plain":
-        context["doc_text_preview"] = get_text_preview(doc.id, max_length=None)
-    
-    # Jeśli istnieje dokument TXT z OCR, dodaj pełny tekst OCR
-    if ocr_txt:
-        context["ocr_text_preview"] = get_text_preview(ocr_txt.id, max_length=None)
-             
-    from fastapi.templating import Jinja2Templates
-    templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-    
-    return templates.TemplateResponse("document.html", context)
+
+        # NOWE: Zbuduj nawigację
+        navigation = build_document_navigation(request, doc, session, parent_opinion)
+
+        steps = [("k1", "k1 – Wywiad"),
+                 ("k2", "k2 – Wyciąg z akt"),
+                 ("k3", "k3 – Opinia"),
+                 ("k4", "k4 – Archiwum")]
+
+        # Kontekst odpowiedzi
+        context = {
+            "request": request,
+            "doc": doc,
+            "ocr_txt": ocr_txt,
+            "steps": steps,
+            "title": navigation['page_title'],
+            # NOWE: Elementy nawigacji
+            **navigation
+        }
+
+        # Jeśli dokument to plik tekstowy, dodaj pełny tekst
+        if doc.mime_type == "text/plain":
+            context["doc_text_preview"] = get_text_preview(doc.id, max_length=None)
+
+        # Jeśli istnieje dokument TXT z OCR, dodaj pełny tekst OCR
+        if ocr_txt:
+            context["ocr_text_preview"] = get_text_preview(ocr_txt.id, max_length=None)
+
+        from fastapi.templating import Jinja2Templates
+        templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+        return templates.TemplateResponse("document.html", context)
 
 @router.post("/document/{doc_id}")
 def document_update(request: Request, doc_id: int,
@@ -612,30 +629,6 @@ def document_preview(request: Request, doc_id: int):
         request.url_for("document_download", doc_id=doc.id)
     )
 
-@router.get("/document/{doc_id}/image-viewer")
-def document_image_viewer(request: Request, doc_id: int):
-    """Zaawansowany podgląd obrazu z funkcją zaznaczania i OCR."""
-    with Session(engine) as session:
-        doc = session.get(Document, doc_id)
-        if not doc:
-            raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
-        
-        # Sprawdź czy dokument to obraz
-        if not doc.mime_type or not doc.mime_type.startswith('image/'):
-            raise HTTPException(status_code=400, detail="Ten widok jest dostępny tylko dla plików obrazowych")
-    
-    from fastapi.templating import Jinja2Templates
-    templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-    
-    return templates.TemplateResponse(
-        "image_view_with_selection.html", 
-        {
-            "request": request, 
-            "doc": doc,
-            "title": f"Podgląd obrazu z zaznaczaniem - {doc.original_filename}"
-        }
-    )
-
 @router.get("/document/{doc_id}/text-preview")
 def document_text_preview(request: Request, doc_id: int):
     """Podgląd pliku tekstowego w formacie HTML."""
@@ -643,6 +636,32 @@ def document_text_preview(request: Request, doc_id: int):
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Nie ma takiego dokumentu")
+
+        # Pobierz opinię nadrzędną jeśli istnieje
+        parent_opinion = None
+        if doc.parent_id:
+            parent_opinion = session.get(Document, doc.parent_id)
+
+        # NOWE: Zbuduj nawigację
+        from app.navigation import BreadcrumbBuilder
+        
+        breadcrumbs = BreadcrumbBuilder(request)
+        
+        if parent_opinion:
+            # Dokument należy do opinii
+            breadcrumbs.add_home().add_opinion(parent_opinion).add_document(doc)
+        else:
+            # Dokument samodzielny
+            breadcrumbs.add_documents().add_document(doc)
+            
+        breadcrumbs.add_current("Podgląd tekstowy", "eye")
+        
+        navigation = {
+            'breadcrumbs': breadcrumbs.build(),
+            'page_title': f"Podgląd tekstowy: {doc.original_filename}",
+            'page_actions': [],
+            'context_info': []
+        }
     
     file_path = FILES_DIR / doc.stored_filename
     
@@ -676,7 +695,8 @@ def document_text_preview(request: Request, doc_id: int):
             "doc": doc,
             "content": content,
             "error_message": error_message,
-            "title": f"Podgląd tekstowy: {doc.original_filename}"
+            "current_year": datetime.now().year,  # Dodaj rok
+            **navigation  # Dodaj elementy nawigacji
         }
     )
 

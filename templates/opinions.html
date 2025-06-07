@@ -1,4 +1,9 @@
+<!-- templates/opinions.html - FRAGMENT ZAKTUALIZOWANY -->
 {% extends 'base.html' %}
+
+<!-- Breadcrumbs, page_title i page_actions są automatyczne z base.html -->
+
+<!-- Dodatkowy kontekst dla filtrów i wyszukiwania -->
 {% block content %}
 {% if request.query_params.get('delete_message') %}
 <div class="alert alert-success alert-dismissible fade show mb-4">
@@ -30,28 +35,28 @@
         <label class="form-label">Status opinii</label>
         <div class="d-flex flex-wrap gap-3">
           <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="k1" id="check_k1" 
+            <input class="form-check-input" type="checkbox" name="k1" id="check_k1"
                    {% if current_filters.k1 %}checked{% endif %}>
             <label class="form-check-label" for="check_k1">
               <span class="badge bg-danger me-1">k1</span> Wywiad
             </label>
           </div>
           <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="k2" id="check_k2" 
+            <input class="form-check-input" type="checkbox" name="k2" id="check_k2"
                    {% if current_filters.k2 %}checked{% endif %}>
             <label class="form-check-label" for="check_k2">
               <span class="badge bg-warning me-1">k2</span> Wyciąg z akt
             </label>
           </div>
           <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="k3" id="check_k3" 
+            <input class="form-check-input" type="checkbox" name="k3" id="check_k3"
                    {% if current_filters.k3 %}checked{% endif %}>
             <label class="form-check-label" for="check_k3">
               <span class="badge bg-success me-1">k3</span> Opinia
             </label>
           </div>
           <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="k4" id="check_k4" 
+            <input class="form-check-input" type="checkbox" name="k4" id="check_k4"
                    {% if current_filters.k4 %}checked{% endif %}>
             <label class="form-check-label" for="check_k4">
               <span class="badge bg-secondary me-1">k4</span> Archiwum
@@ -62,7 +67,7 @@
       <div class="col-md-6">
         <label class="form-label">Wyszukiwanie</label>
         <div class="input-group">
-          <input type="text" class="form-control" name="search" 
+          <input type="text" class="form-control" name="search"
                  value="{{ current_filters.search }}"
                  placeholder="Sygnatura, nazwa pliku, treść dokumentów...">
           <button type="submit" class="btn btn-primary">
@@ -70,7 +75,7 @@
           </button>
         </div>
         <div class="form-check mt-2">
-          <input class="form-check-input" type="checkbox" name="search_content" id="search_content" 
+          <input class="form-check-input" type="checkbox" name="search_content" id="search_content"
                  {% if current_filters.search_content %}checked{% endif %}>
           <label class="form-check-label" for="search_content">
             <i class="bi bi-file-text me-1"></i> Wyszukaj również w treści dokumentów
@@ -78,7 +83,7 @@
           </label>
         </div>
         <div class="form-check mt-1">
-          <input class="form-check-input" type="checkbox" name="fuzzy_search" id="fuzzy_search" 
+          <input class="form-check-input" type="checkbox" name="fuzzy_search" id="fuzzy_search"
                  {% if current_filters.fuzzy_search %}checked{% endif %}>
           <label class="form-check-label" for="fuzzy_search">
             <i class="bi bi-magic me-1"></i> Wyszukiwanie rozmyte
@@ -350,7 +355,7 @@
 document.addEventListener('DOMContentLoaded', function() {
   // Znajdź przycisk "Anuluj" w modalu notatek
   const cancelButton = document.querySelector('#noteEditModal .btn-outline-secondary');
-  
+
   if (cancelButton) {
     cancelButton.addEventListener('click', function() {
       // Jawnie zamknij modal za pomocą API Bootstrap
@@ -358,7 +363,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (noteModal) {
         noteModal.hide();
       }
-      
+
       // Upewnij się, że modal-backdrop jest usunięty
       setTimeout(function() {
         const modalBackdrops = document.querySelectorAll('.modal-backdrop');
@@ -381,11 +386,11 @@ console.log('Bieżąca ścieżka: ' + window.location.pathname);
     alert('Błąd: nie można określić ID dokumentu');
     return false;
   }
-  
+
   // Jawnie ustaw absolutny URL, a nie relatywny
   const form = document.getElementById('noteForm');
   const base = window.location.origin; // np. "http://example.com"
-  
+
   // Sprawdź na jakiej stronie jesteśmy - bardziej niezawodna metoda
   if (window.location.pathname.startsWith('/opinions') || window.location.pathname === '/') {
     form.action = base + '/opinion/' + docId + '/update-note';
@@ -394,7 +399,7 @@ console.log('Bieżąca ścieżka: ' + window.location.pathname);
     form.action = base + '/document/' + docId + '/update-note';
     console.log('Wysyłam formularz do [document]: ' + form.action);
   }
-  
+
   return true;
 }
 
@@ -410,7 +415,7 @@ function toggleAllFilters(state) {
 // Automatyczne submitowanie formularza przy zmianie checkboxów
 document.addEventListener('DOMContentLoaded', function() {
   const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
-  
+
   checkboxes.forEach(checkbox => {
     checkbox.addEventListener('change', function() {
       // Krótkie opóźnienie aby user mógł zaznaczyć więcej checkboxów
@@ -420,11 +425,11 @@ document.addEventListener('DOMContentLoaded', function() {
       }, 500);
     });
   });
-  
+
   // Auto-submit dla checkboxów wyszukiwania
   const searchContentCheckbox = document.querySelector('input[name="search_content"]');
   const fuzzySearchCheckbox = document.querySelector('input[name="fuzzy_search"]');
-  
+
   if (searchContentCheckbox) {
     searchContentCheckbox.addEventListener('change', function() {
       const searchInput = document.querySelector('input[name="search"]');
@@ -441,7 +446,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
   }
-  
+
   if (fuzzySearchCheckbox) {
     fuzzySearchCheckbox.addEventListener('change', function() {
       const searchInput = document.querySelector('input[name="search"]');
@@ -452,7 +457,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
   }
-  
+
   // Natychmiastowe submitowanie przy Enter w polu wyszukiwania
   const searchInput = document.querySelector('input[name="search"]');
   if (searchInput) {
@@ -463,7 +468,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
   }
-  
+
   // Event listener dla przycisku edycji notatki
 
 document.querySelectorAll('[data-bs-target="#noteEditModal"]').forEach(function(button) {
@@ -473,15 +478,15 @@ document.querySelectorAll('[data-bs-target="#noteEditModal"]').forEach(function(
 
     const docId = this.getAttribute('data-doc-id');
     console.log('Kliknięto przycisk edycji dla dokumentu ID: ' + docId); // Debugging
-    
+
     const noteContent = document.getElementById('note-content-' + docId).textContent;
-    
+
     document.getElementById('noteDocId').value = docId;
     document.getElementById('noteContent').value = noteContent;
-    
+
     // Ustaw wartość akcji formularza, ale nie polegaj wyłącznie na tym
     document.getElementById('noteForm').action = '/document/' + docId + '/update-note';
-    
+
     // Ręczne otwieranie modala (zapasowo, gdyby data-bs-* nie działały)
     const modal = new bootstrap.Modal(document.getElementById('noteEditModal'));
     modal.show();
@@ -508,10 +513,10 @@ document.body.addEventListener('keydown', function(e) {
 function quickPreview(docId, docName) {
   // Ustaw tytuł modalu
   document.getElementById('previewModalTitle').innerHTML = `<i class="bi bi-eye me-2"></i>${docName}`;
-  
+
   // Ustaw link do pełnego podglądu
   document.getElementById('previewModalLink').href = `/opinion/${docId}`;
-  
+
   // Pokaż spinner ładowania
   document.getElementById('previewModalBody').innerHTML = `
     <div class="d-flex justify-content-center align-items-center" style="height: 500px;">
@@ -521,11 +526,11 @@ function quickPreview(docId, docName) {
       <span class="ms-3">Wczytywanie podglądu...</span>
     </div>
   `;
-  
+
   // Otwórz modal
   const modal = new bootstrap.Modal(document.getElementById('quickPreviewModal'));
   modal.show();
-  
+
   // Pobierz zawartość podglądu
   fetch(`/document/${docId}/preview-content`)
     .then(response => {

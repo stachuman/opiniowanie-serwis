@@ -1,24 +1,22 @@
-0{% extends 'base.html' %}
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h2>Utwórz nową pustą opinię</h2>
-  <div>
-    <a href="{{ url_for('list_opinions') }}" class="btn btn-outline-secondary">
-      <i class="bi bi-arrow-left"></i> Powrót do listy opinii
-    </a>
-  </div>
-</div>
+<!-- templates/create_empty_opinion.html - ZAKTUALIZOWANY -->
+{% extends 'base.html' %}
 
+<!-- Breadcrumbs i page_title są automatyczne z base.html -->
+
+{% block content %}
 <div class="card">
   <div class="card-header bg-light">
-    <h5 class="card-title mb-0">Dane nowej opinii</h5>
+    <h5 class="card-title mb-0">
+      <i class="bi bi-file-earmark me-2"></i>Dane nowej opinii
+    </h5>
   </div>
   <div class="card-body">
     <form method="post">
       <div class="row mb-3">
         <div class="col-md-6">
           <label for="sygnatura" class="form-label">Sygnatura sprawy</label>
-          <input type="text" class="form-control" id="sygnatura" name="sygnatura" placeholder="Np. IV K 123/23">
+          <input type="text" class="form-control" id="sygnatura" name="sygnatura"
+                 placeholder="Np. IV K 123/23">
         </div>
         <div class="col-md-6">
           <label for="step" class="form-label">Status początkowy</label>
@@ -30,7 +28,7 @@
           </select>
         </div>
       </div>
-      
+
       <div class="mb-3">
         <label for="doc_type" class="form-label">Rodzaj dokumentu</label>
         <select class="form-select" id="doc_type" name="doc_type" required>
@@ -41,15 +39,20 @@
           <option value="Inne">Inne</option>
         </select>
       </div>
-      
+
       <div class="alert alert-info">
         <i class="bi bi-info-circle-fill me-2"></i>
         <strong>Informacja:</strong> Tworzysz pustą opinię. Dokumenty Word i pliki PDF możesz dodać później
         z poziomu widoku szczegółów opinii.
       </div>
-      
-      <div class="mt-4 d-flex justify-content-end">
-        <a href="{{ url_for('list_opinions') }}" class="btn btn-outline-secondary me-2">Anuluj</a>
+
+      <div class="d-flex justify-content-end gap-2">
+        <!-- Automatyczny przycisk anuluj -->
+        {% if breadcrumbs and breadcrumbs|length > 1 %}
+          <a href="{{ breadcrumbs[-2].url }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Anuluj
+          </a>
+        {% endif %}
         <button type="submit" class="btn btn-primary">
           <i class="bi bi-plus-circle me-1"></i> Utwórz opinię
         </button>
