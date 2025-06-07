@@ -1,4 +1,4 @@
-0{% extends 'base.html' %}
+{% extends 'base.html' %}
 {% block content %}
 {% if request.query_params.get('delete_message') %}
 <div class="alert alert-success alert-dismissible fade show mb-4">
@@ -22,7 +22,7 @@
 
 <h2 class="mb-4">Lista dokumentów</h2>
 
-<!-- Filtrowanie (opcjonalne) -->
+<!-- Filtrowanie z checkboxami -->
 <div class="card mb-4">
   <div class="card-header bg-light">
     <h5 class="card-title mb-0">
@@ -31,28 +31,114 @@
   </div>
   <div class="card-body">
     <form method="get" class="row g-3">
-      <div class="col-md-4">
+      <div class="col-md-6">
         <label class="form-label">Status dokumentu</label>
-        <select class="form-select" name="step">
-          <option value="">Wszystkie statusy</option>
-          <option value="k1">k1 – Wywiad</option>
-          <option value="k2">k2 – Wyciąg z akt</option>
-          <option value="k3">k3 – Opinia</option>
-          <option value="k4">k4 – Archiwum</option>
+        <div class="d-flex flex-wrap gap-3">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="k1" id="check_k1" 
+                   {% if current_filters.k1 %}checked{% endif %}>
+            <label class="form-check-label" for="check_k1">
+              <span class="badge bg-danger me-1">k1</span> Wywiad
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="k2" id="check_k2" 
+                   {% if current_filters.k2 %}checked{% endif %}>
+            <label class="form-check-label" for="check_k2">
+              <span class="badge bg-warning me-1">k2</span> Wyciąg z akt
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="k3" id="check_k3" 
+                   {% if current_filters.k3 %}checked{% endif %}>
+            <label class="form-check-label" for="check_k3">
+              <span class="badge bg-success me-1">k3</span> Opinia
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="k4" id="check_k4" 
+                   {% if current_filters.k4 %}checked{% endif %}>
+            <label class="form-check-label" for="check_k4">
+              <span class="badge bg-secondary me-1">k4</span> Archiwum
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Typ dokumentu</label>
+        <select class="form-select" name="doc_type_filter">
+          <option value="all" {% if current_filters.doc_type_filter == 'all' %}selected{% endif %}>
+            Wszystkie typy
+          </option>
+          <option value="opinions" {% if current_filters.doc_type_filter == 'opinions' %}selected{% endif %}>
+            Tylko opinie (dokumenty główne)
+          </option>
+          <option value="attachments" {% if current_filters.doc_type_filter == 'attachments' %}selected{% endif %}>
+            Tylko załączniki
+          </option>
+          <option value="pdf" {% if current_filters.doc_type_filter == 'pdf' %}selected{% endif %}>
+            Tylko pliki PDF
+          </option>
+          <option value="images" {% if current_filters.doc_type_filter == 'images' %}selected{% endif %}>
+            Tylko obrazy
+          </option>
+          <option value="word" {% if current_filters.doc_type_filter == 'word' %}selected{% endif %}>
+            Tylko dokumenty Word
+          </option>
+          <option value="ocr_results" {% if current_filters.doc_type_filter == 'ocr_results' %}selected{% endif %}>
+            Tylko wyniki OCR
+          </option>
         </select>
       </div>
-      <div class="col-md-4">
+      <div class="col-12">
         <label class="form-label">Wyszukiwanie</label>
-        <input type="text" class="form-control" name="search" placeholder="Nazwa pliku, sygnatura...">
-      </div>
-      <div class="col-md-4 d-flex align-items-end">
-        <div class="d-flex gap-2">
+        <div class="input-group">
+          <input type="text" class="form-control" name="search" 
+                 value="{{ current_filters.search }}"
+                 placeholder="Nazwa pliku, sygnatura, typ dokumentu, treść...">
           <button type="submit" class="btn btn-primary">
             <i class="bi bi-search me-1"></i> Filtruj
           </button>
+        </div>
+        <div class="form-check mt-2">
+          <input class="form-check-input" type="checkbox" name="search_content" id="search_content" 
+                 {% if current_filters.search_content %}checked{% endif %}>
+          <label class="form-check-label" for="search_content">
+            <i class="bi bi-file-text me-1"></i> Wyszukaj również w treści dokumentów
+            <small class="text-muted">(PDF, Word, OCR)</small>
+          </label>
+        </div>
+        <div class="form-check mt-1">
+          <input class="form-check-input" type="checkbox" name="fuzzy_search" id="fuzzy_search" 
+                 {% if current_filters.fuzzy_search %}checked{% endif %}>
+          <label class="form-check-label" for="fuzzy_search">
+            <i class="bi bi-magic me-1"></i> Wyszukiwanie rozmyte
+            <small class="text-muted">(ignoruje błędy pisowni, znaki diakrytyczne)</small>
+          </label>
+        </div>
+        <div class="form-text">
+          <strong>Wyszukiwanie standardowe:</strong> nazwa pliku, sygnatura, typ dokumentu<br>
+          <strong>Wyszukiwanie w treści:</strong> zawartość PDF, Word, wyników OCR<br>
+          <strong>Wyszukiwanie rozmyte:</strong> znajduje podobne słowa (np. "faktura" znajdzie "fakturą")
+          {% if not has_docx %}
+          <div class="text-warning mt-1">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            <small>Wyszukiwanie w dokumentach Word wymaga biblioteki python-docx</small>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-12">
+        <div class="d-flex gap-2">
           <a href="{{ url_for('list_documents') }}" class="btn btn-outline-secondary">
-            <i class="bi bi-x-circle me-1"></i> Resetuj
+            <i class="bi bi-x-circle me-1"></i> Resetuj filtry
           </a>
+          <button type="button" class="btn btn-outline-info" onclick="toggleAllFilters(true)">
+            <i class="bi bi-check-all me-1"></i> Zaznacz wszystkie statusy
+          </button>
+          <button type="button" class="btn btn-outline-warning" onclick="toggleAllFilters(false)">
+            <i class="bi bi-dash-square me-1"></i> Odznacz wszystkie statusy
+          </button>
         </div>
       </div>
     </form>
@@ -65,7 +151,16 @@
       <h5 class="card-title mb-0">
         <i class="bi bi-files me-2"></i>Wykaz dokumentów
       </h5>
-      <span class="badge bg-primary">Łącznie: {{ docs|length }}</span>
+      <span class="badge bg-primary">
+        {% if total_count %}
+          Wyświetlane: {{ total_count }} 
+          {% if current_filters.search or current_filters.doc_type_filter != 'all' or not (current_filters.k1 and current_filters.k2 and current_filters.k3 and current_filters.k4) %}
+            (po filtrowaniu)
+          {% endif %}
+        {% else %}
+          Łącznie: {{ docs|length }}
+        {% endif %}
+      </span>
     </div>
   </div>
   <div class="card-body p-0">
@@ -80,7 +175,11 @@
             <th scope="col">Nazwa pliku</th>
             <th scope="col" class="text-center">Status</th>
             <th scope="col" class="text-center">OCR</th>
+            {% if current_filters.search %}
+            <th scope="col" class="text-center">Dopasowanie</th>
+            {% endif %}
             <th scope="col">Data dodania</th>
+            <th scope="col" class="text-center">Akcje</th>
           </tr>
         </thead>
         <tbody>
@@ -88,19 +187,28 @@
           <tr data-href="{{ url_for('document_detail', doc_id=doc.id) }}">
             <td>{{ doc.id }}</td>
             <td>
-              {% if doc.mime_type and doc.mime_type.startswith('image/') %}
+              {% if doc.is_main %}
+                <i class="bi bi-bookmark-star-fill text-warning" title="Opinia główna"></i>
+              {% elif doc.mime_type and doc.mime_type.startswith('image/') %}
                 <i class="bi bi-file-earmark-image text-info" title="Obraz"></i>
               {% elif doc.mime_type == 'application/pdf' %}
                 <i class="bi bi-file-earmark-pdf text-danger" title="PDF"></i>
               {% elif doc.mime_type and doc.mime_type.startswith('application/') and 'word' in doc.mime_type %}
                 <i class="bi bi-file-earmark-word text-primary" title="Word"></i>
+              {% elif doc.doc_type == 'OCR TXT' %}
+                <i class="bi bi-file-earmark-text text-success" title="Wynik OCR"></i>
               {% else %}
                 <i class="bi bi-file-earmark" title="Dokument"></i>
               {% endif %}
             </td>
             <td>{{ doc.sygnatura or "" }}</td>
             <td>{{ doc.doc_type or "" }}</td>
-            <td>{{ doc.original_filename }}</td>
+            <td>
+              {{ doc.original_filename }}
+              {% if doc.is_main %}
+                <span class="badge bg-warning ms-2">GŁÓWNY</span>
+              {% endif %}
+            </td>
             <!-- ikona statusu -->
             <td class="text-center">
               {% if doc.step == 'k1' %}
@@ -142,9 +250,50 @@
               <span class="badge bg-warning p-2">
                 <i class="bi bi-hourglass-split"></i>
               </span>
+             {% else %}
+              <span class="text-muted">-</span>
              {% endif %}
             </td>
+            {% if current_filters.search %}
+            <td class="text-center">
+              {% if search_matches.get(doc.id) %}
+                {% for match_type in search_matches[doc.id] %}
+                  {% if match_type == 'metadata' %}
+                    <span class="badge bg-primary" title="Znaleziono w nazwie, sygnaturze lub typie">META</span>
+                  {% elif match_type == 'fuzzy_metadata' %}
+                    <span class="badge bg-info" title="Znaleziono rozmycie w metadanych">~META</span>
+                  {% elif match_type == 'content' %}
+                    <span class="badge bg-success" title="Znaleziono w treści dokumentu">TREŚĆ</span>
+                  {% elif match_type == 'fuzzy_content' %}
+                    <span class="badge bg-warning" title="Znaleziono rozmycie w treści">~TREŚĆ</span>
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            </td>
+            {% endif %}
             <td>{{ doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td class="text-center" onclick="event.stopPropagation();">
+              <div class="btn-group">
+                <a href="{{ url_for('document_download', doc_id=doc.id) }}" 
+                  class="btn btn-sm btn-outline-primary" 
+                  title="Pobierz dokument">
+                  <i class="bi bi-download"></i>
+                </a>
+                {% if doc.is_main %}
+                  <a href="{{ url_for('opinion_detail', doc_id=doc.id) }}"
+                    class="btn btn-sm btn-outline-secondary"
+                    title="Szczegóły opinii">
+                    <i class="bi bi-eye"></i>
+                  </a>
+                {% else %}
+                  <a href="{{ url_for('document_detail', doc_id=doc.id) }}"
+                    class="btn btn-sm btn-outline-secondary"
+                    title="Szczegóły dokumentu">
+                    <i class="bi bi-eye"></i>
+                  </a>
+                {% endif %}
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -154,7 +303,12 @@
     {% if docs|length == 0 %}
     <div class="text-center py-5">
       <i class="bi bi-file-earmark" style="font-size: 3rem; color: #6c757d;"></i>
-      <p class="mt-3 text-muted">Brak dokumentów w bazie danych.</p>
+      {% if current_filters.search or current_filters.doc_type_filter != 'all' or not (current_filters.k1 and current_filters.k2 and current_filters.k3 and current_filters.k4) %}
+        <p class="mt-3 text-muted">Nie znaleziono dokumentów spełniających kryteria filtrowania.</p>
+        <p>Spróbuj zmienić filtry lub zresetować wyszukiwanie.</p>
+      {% else %}
+        <p class="mt-3 text-muted">Brak dokumentów w bazie danych.</p>
+      {% endif %}
     </div>
     {% endif %}
   </div>
@@ -166,9 +320,89 @@
     <a href="{{ url_for('upload_form') }}" class="btn btn-primary">
       <i class="bi bi-file-earmark-word me-1"></i> Dodaj opinię przez dokument Word
     </a>
+    <a href="{{ url_for('create_empty_opinion_form') }}" class="btn btn-success">
+      <i class="bi bi-plus-circle me-1"></i> Utwórz pustą opinię
+    </a>
     <a href="{{ url_for('quick_ocr_form') }}" class="btn btn-info">
       <i class="bi bi-lightning me-1"></i> Szybki OCR
     </a>
   </div>
 </div>
+
+<script>
+// Funkcja do zaznaczania/odznaczania wszystkich checkboxów statusu
+function toggleAllFilters(state) {
+  const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
+  checkboxes.forEach(checkbox => {
+    checkbox.checked = state;
+  });
+}
+
+// Automatyczne submitowanie formularza przy zmianie checkboxów i select
+document.addEventListener('DOMContentLoaded', function() {
+  const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
+  const selectFilter = document.querySelector('select[name="doc_type_filter"]');
+  const searchContentCheckbox = document.querySelector('input[name="search_content"]');
+  const fuzzySearchCheckbox = document.querySelector('input[name="fuzzy_search"]');
+  
+  // Auto-submit dla checkboxów statusu
+  checkboxes.forEach(checkbox => {
+    checkbox.addEventListener('change', function() {
+      // Krótkie opóźnienie aby user mógł zaznaczyć więcej checkboxów
+      clearTimeout(window.filterTimeout);
+      window.filterTimeout = setTimeout(function() {
+        document.querySelector('form').submit();
+      }, 500);
+    });
+  });
+  
+  // Auto-submit dla select typu dokumentu
+  if (selectFilter) {
+    selectFilter.addEventListener('change', function() {
+      document.querySelector('form').submit();
+    });
+  }
+  
+  // Auto-submit dla checkbox wyszukiwania w treści (z ostrzeżeniem)
+  if (searchContentCheckbox) {
+    searchContentCheckbox.addEventListener('change', function() {
+      const searchInput = document.querySelector('input[name="search"]');
+      if (this.checked && searchInput.value.trim()) {
+        // Pokaż ostrzeżenie o potencjalnie wolnym wyszukiwaniu
+        if (confirm('Wyszukiwanie w treści dokumentów może być wolne dla dużej liczby dokumentów. Kontynuować?')) {
+          document.querySelector('form').submit();
+        } else {
+          this.checked = false;
+        }
+      } else if (!this.checked) {
+        // Jeśli odznaczamy, automatycznie przefiltruj
+        document.querySelector('form').submit();
+      }
+    });
+  }
+  
+  // Auto-submit dla checkbox fuzzy search
+  if (fuzzySearchCheckbox) {
+    fuzzySearchCheckbox.addEventListener('change', function() {
+      const searchInput = document.querySelector('input[name="search"]');
+      if (this.checked && searchInput.value.trim()) {
+        document.querySelector('form').submit();
+      } else if (!this.checked) {
+        document.querySelector('form').submit();
+      }
+    });
+  }
+  
+  // Natychmiastowe submitowanie przy Enter w polu wyszukiwania
+  const searchInput = document.querySelector('input[name="search"]');
+  if (searchInput) {
+    searchInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        document.querySelector('form').submit();
+      }
+    });
+  }
+});
+</script>
 {% endblock %}

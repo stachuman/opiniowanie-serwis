@@ -1,6 +1,7 @@
 from datetime import datetime
 from sqlmodel import SQLModel, Field
 
+
 class Document(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     sygnatura: str | None = None
@@ -26,6 +27,7 @@ class Document(SQLModel, table=True):
     last_modified_by: str | None = None # Osoba, która ostatnio modyfikowała dokument
     last_modified: datetime | None = None  # Data ostatniej modyfikacji
     comments: str | None = None         # Komentarze/uwagi do dokumentu
+    note: str | None = None             # Krótka notatka dotycząca dokumentu
 
     # Nowe pola do śledzenia postępu OCR
     ocr_progress: float | None = None  # Postęp od 0.0 do 1.0

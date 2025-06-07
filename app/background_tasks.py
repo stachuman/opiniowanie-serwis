@@ -82,6 +82,9 @@ async def ocr_worker():
 async def _process_ocr_document(doc_id: int):
     """Przetwarza pojedynczy dokument OCR w tle."""
     from tasks.ocr_manager import process_document
+    from sqlmodel import Session
+    from app.db import engine
+    from app.models import Document
     
     try:
         # Wywołaj funkcję OCR

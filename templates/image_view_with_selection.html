@@ -5,7 +5,7 @@
   <div class="row">
     <div class="col-12">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2>Podgląd PDF z zaznaczaniem</h2>
+        <h2>Podgląd obrazu z zaznaczaniem</h2>
         <div>
           {% if doc.parent_id %}
           <!-- Gdy dokument ma rodzica (jest częścią opinii), wróć do widoku opinii -->
@@ -20,7 +20,7 @@
           {% endif %}
           
           <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-outline-primary">
-            <i class="bi bi-download"></i> Pobierz PDF
+            <i class="bi bi-download"></i> Pobierz obraz
           </a>
           
           <!-- Przycisk uruchamiania OCR -->
@@ -37,25 +37,20 @@
   </div>
 
   <div class="row">
-    <!-- Kolumna z podglądem PDF -->
+    <!-- Kolumna z podglądem obrazu -->
     <div class="col-lg-8">
       <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header">
           <h5 class="mb-0">{{ doc.original_filename }}</h5>
-          <div class="btn-group" role="group">
-            <button id="prevPage" class="btn btn-sm btn-outline-secondary">
-              <i class="bi bi-arrow-left"></i> Poprzednia
-            </button>
-            <span id="pageInfo" class="btn btn-sm btn-outline-secondary disabled"></span>
-            <button id="nextPage" class="btn btn-sm btn-outline-secondary">
-              Następna <i class="bi bi-arrow-right"></i>
-            </button>
-          </div>
         </div>
         <div class="card-body p-0 position-relative">
-          <div id="pdfContainer" style="height: 800px; position: relative; overflow: hidden;">
-            <canvas id="pdfCanvas" style="width: 100%; height: 100%;"></canvas>
-            <div id="selectionOverlay" style="position: absolute; top: 0; left: 0; border: 2px dashed #007bff; background-color: rgba(0, 123, 255, 0.2); display: none; pointer-events: none;"></div>
+          <div id="imageContainer" style="height: 800px; position: relative; overflow: auto; display: flex; justify-content: center; align-items: center;">
+            <div id="imageWrapper" style="position: relative; display: inline-block;">
+              <img id="mainImage" src="{{ url_for('document_preview', doc_id=doc.id) }}" 
+                   alt="{{ doc.original_filename }}" 
+                   style="display: block; max-width: 100%; height: auto; cursor: crosshair;">
+              <div id="selectionOverlay" style="position: absolute; top: 0; left: 0; border: 2px dashed #007bff; background-color: rgba(0, 123, 255, 0.2); display: none; pointer-events: none;"></div>
+            </div>
           </div>
           
           <!-- Loader dla procesu OCR -->
@@ -84,10 +79,10 @@
           </div>
         </div>
         <div class="card-body">
-          <!-- Sekcja dla pełnego tekstu strony -->
-          <div id="fullPageSection">
+          <!-- Sekcja dla pełnego tekstu obrazu -->
+          <div id="fullImageSection">
             <div class="d-flex justify-content-between mb-2">
-              <h6 class="mb-0">Pełny tekst strony</h6>
+              <h6 class="mb-0">Pełny tekst obrazu</h6>
               <div class="btn-group">
                 <button id="saveChangesBtn" class="btn btn-sm btn-outline-success d-none" onclick="saveCurrentText()">
                   <i class="bi bi-save"></i> Zapisz zmiany
@@ -166,43 +161,24 @@
 {% endblock %}
 
 {% block scripts %}
-<!-- Dodaj PDF.js -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.min.js"></script>
 <script>
   document.addEventListener('DOMContentLoaded', function() {
-    // Inicjalizacja PDF.js
-    const pdfjsLib = window['pdfjs-dist/build/pdf'];
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.worker.min.js';
-
     // Elementy DOM
-    const pdfContainer = document.getElementById('pdfContainer');
-    const canvas = document.getElementById('pdfCanvas');
-    const ctx = canvas.getContext('2d');
-    const prevPageBtn = document.getElementById('prevPage');
-    const nextPageBtn = document.getElementById('nextPage');
-    const pageInfo = document.getElementById('pageInfo');
-    const selectionOverlay = document.getElementById('selectionOverlay');
-    const copyFullBtn = document.getElementById('copyFullBtn');
-    const ocrLoader = document.getElementById('ocrLoader');
-    const copyFullArea = document.getElementById('copyFullArea');
+    var imageContainer = document.getElementById('imageContainer');
+    var imageWrapper = document.getElementById('imageWrapper');
+    var mainImage = document.getElementById('mainImage');
+    var selectionOverlay = document.getElementById('selectionOverlay');
+    var copyFullBtn = document.getElementById('copyFullBtn');
+    var ocrLoader = document.getElementById('ocrLoader');
+    var copyFullArea = document.getElementById('copyFullArea');
 
     // Zmienne pomocnicze
-    let pdfDoc = null;
-    let pageNum = 1;
-    let pageRendering = false;
-    let pageNumPending = null;
-    let scale = 1.5;
-    let isSelecting = false;
-    let startX, startY, endX, endY;
-    let currentPdfUrl = '{{ url_for("document_preview", doc_id=doc.id) }}';
-    let docId = {{ doc.id }};
-    let ocrText = {};
-    let currentFullPageOcr = null;
-    let documentHasFullOcr = {{ 'true' if doc.ocr_status == 'done' else 'false' }};
+    var isSelecting = false;
+    var startX, startY, endX, endY;
+    var docId = {{ doc.id }};
+    var currentFullImageOcr = null;
+    var documentHasFullOcr = {{ 'true' if doc.ocr_status == 'done' else 'false' }};
     
-    // Ważne - przechowujemy aktualny viewport strony do prawidłowego przeliczania współrzędnych
-    let currentViewport = null;
-
     // Zmienne dla trybu edycji
     let isEditMode = false;
     let originalTextBeforeEdit = '';
@@ -210,142 +186,37 @@
     let textChanged = false;
 
     // Główny element do wyświetlania tekstu
-    let fullPageText = document.getElementById('textDisplay');
-
-    // Ładowanie dokumentu PDF
-    pdfjsLib.getDocument(currentPdfUrl).promise.then(function(pdf) {
-      pdfDoc = pdf;
-      pageInfo.textContent = `Strona ${pageNum} z ${pdfDoc.numPages}`;
-      
-      // Renderuj pierwszą stronę
-      renderPage(pageNum);
-      
-      // Pobierz OCR dla pierwszej strony, jeśli jest dostępny
-      if (documentHasFullOcr) {
-        fetchOcrText(pageNum);
-      } else {
-        setupInitialMessage();
-      }
-      
-      // Ustaw monitorowanie zmian tekstu
-      setupTextChangeMonitoring();
-    });
-
-    // Funkcja renderująca stronę
-    function renderPage(num) {
-      pageRendering = true;
-      
-      // Pobierz stronę PDF
-      pdfDoc.getPage(num).then(function(page) {
-        // Dostosuj rozmiar kanwy do strony PDF
-        const viewport = page.getViewport({ scale: scale });
-        currentViewport = viewport; // Zapisz viewport do późniejszego użycia
-        
-        // Oblicz prawidłowe wymiary Canvas dla uniknięcia zniekształceń
-        const parent = canvas.parentNode;
-        const parentWidth = parent.clientWidth;
-        
-        // Zachowaj proporcje strony PDF
-        const ratio = viewport.width / viewport.height;
-        
-        // Ustaw wymiary Canvas
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
-        
-        // Renderuj stronę na kanwie
-        const renderContext = {
-          canvasContext: ctx,
-          viewport: viewport
-        };
-        
-        page.render(renderContext).promise.then(function() {
-          pageRendering = false;
-          
-          if (pageNumPending !== null) {
-            // Jeśli jest oczekująca strona, renderuj ją
-            renderPage(pageNumPending);
-            pageNumPending = null;
-          }
-        });
-        
-        // Aktualizuj informacje o stronie
-        pageInfo.textContent = `Strona ${num} z ${pdfDoc.numPages}`;
-      });
-      
-      // Pobierz OCR dla wybranej strony, jeśli dokument ma pełny OCR
-      if (documentHasFullOcr) {
-        fetchOcrText(num);
-      } else {
-        // Resetuj wyświetlanie tekstów
-        hideSelection();
-        setupInitialMessage();
-      }
-    }
-
-    // Funkcja pobierająca tekst OCR dla strony
-    function fetchOcrText(page) {
-      // Jeśli już mamy OCR dla tej strony, po prostu wyświetl go
-      if (ocrText[page]) {
-        updateDisplayText(ocrText[page]);
-        return;
-      }
-      
-      fullPageText.innerHTML = `<div class="d-flex justify-content-center">
-        <div class="spinner-border text-secondary" role="status">
-          <span class="visually-hidden">Ładowanie...</span>
-        </div>
-      </div>`;
-      
-      // Najpierw spróbuj zsynchronizować z serwerem
-      syncWithServer().then(hasServerText => {
-        if (!hasServerText) {
-          // Jeśli serwer nie ma tekstu, wykonaj OCR
-          performOcrForPage(page);
-        }
-      }).catch(() => {
-        // W przypadku błędu synchronizacji, wykonaj OCR
-        performOcrForPage(page);
-      });
-    }
-
-    // Wynieś logikę OCR do osobnej funkcji
-    function performOcrForPage(page) {
-      // Utwórz dane do wysłania
-      const data = {
-        page: page,
-        x1: 0, y1: 0, x2: 1, y2: 1  // Cała strona
-      };
-      
-      // Wyślij zapytanie do API
-      fetch(`/api/document/${docId}/ocr-selection`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.success) {
-          // Zapisz OCR dla tej strony
-          ocrText[page] = data.text;
-          // Zapisz pełny tekst strony
-          currentFullPageOcr = data.text;
-          // Wyświetl OCR
-          updateDisplayText(data.text);
+    let fullImageText = document.getElementById('textDisplay');
+    
+    // Funkcja sprawdzająca czy obraz został załadowany
+    function waitForImageLoad() {
+      if (mainImage.complete && mainImage.naturalHeight !== 0) {
+        setupImageInteraction();
+        if (documentHasFullOcr) {
+          fetchFullImageOcr();
         } else {
-          fullPageText.innerHTML = `<div class="alert alert-warning">
-            <i class="bi bi-exclamation-triangle-fill me-2"></i>
-            ${data.error || 'Nie udało się pobrać tekstu OCR'}
-          </div>`;
+          setupInitialMessage();
         }
-      })
-      .catch(error => {
-        fullPageText.innerHTML = `<div class="alert alert-danger">
-          <i class="bi bi-exclamation-triangle-fill me-2"></i>
-          Błąd: ${error.message}
-        </div>`;
-      });
+        setupTextChangeMonitoring();
+      } else {
+        mainImage.onload = function() {
+          setupImageInteraction();
+          if (documentHasFullOcr) {
+            fetchFullImageOcr();
+          } else {
+            setupInitialMessage();
+          }
+          setupTextChangeMonitoring();
+        };
+      }
+    }
+
+    // Konfiguracja początkowa
+    function setupImageInteraction() {
+      // Wyśrodkuj obraz
+      imageContainer.style.display = 'flex';
+      imageContainer.style.justifyContent = 'center';
+      imageContainer.style.alignItems = 'center';
     }
 
     function setupInitialMessage() {
@@ -353,117 +224,163 @@
       syncWithServer().then(hasServerText => {
         if (!hasServerText) {
           // Jeśli nie ma tekstu na serwerze, pokaż komunikat
-          fullPageText.innerHTML = `<div class="alert alert-secondary">
-            <i class="bi bi-info-circle-fill me-2"></i> 
-            Brak pełnego OCR dla tego dokumentu. Zaznacz fragment tekstu na dokumencie, 
-            aby rozpoznać wybrany obszar.
-          </div>`;
+          fullImageText.innerHTML = '<div class="alert alert-secondary">' +
+            '<i class="bi bi-info-circle-fill me-2"></i> ' +
+            'Brak pełnego OCR dla tego obrazu. Zaznacz fragment tekstu na obrazie, ' +
+            'aby rozpoznać wybrany obszar.' +
+            '</div>';
         }
       });
     }
 
-    // Funkcja queueRenderPage zapewniająca, że tylko jedna strona jest renderowana naraz
-    function queueRenderPage(num) {
-      if (pageRendering) {
-        pageNumPending = num;
-      } else {
-        renderPage(num);
+    // Funkcja pobierająca tekst OCR dla całego obrazu
+    function fetchFullImageOcr() {
+      fullImageText.innerHTML = '<div class="d-flex justify-content-center">' +
+        '<div class="spinner-border text-secondary" role="status">' +
+        '<span class="visually-hidden">Ładowanie...</span>' +
+        '</div>' +
+        '</div>';
+      
+      // Najpierw spróbuj zsynchronizować z serwerem
+      syncWithServer().then(hasServerText => {
+        if (!hasServerText) {
+          // Jeśli serwer nie ma tekstu, wykonaj OCR
+          performOcrForImage();
+        }
+      }).catch(() => {
+        // W przypadku błędu synchronizacji, wykonaj OCR
+        performOcrForImage();
+      });
+    }
+
+    // Wynieś logikę OCR do osobnej funkcji
+    function performOcrForImage() {
+      // Utwórz dane do wysłania (cały obraz)
+      const data = {
+        page: 1,
+        x1: 0, y1: 0, x2: 1, y2: 1  // Cały obraz
+      };
+      
+      // Wyślij zapytanie do API
+      fetch('/api/document/' + docId + '/ocr-selection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+      })
+      .then(function(response) { return response.json(); })
+      .then(function(data) {
+        if (data.success) {
+          // Zapisz OCR całego obrazu
+          currentFullImageOcr = data.text;
+          // Wyświetl OCR
+          updateDisplayText(data.text);
+        } else {
+          fullImageText.innerHTML = '<div class="alert alert-warning">' +
+            '<i class="bi bi-exclamation-triangle-fill me-2"></i>' +
+            (data.error || 'Nie udało się pobrać tekstu OCR') +
+            '</div>';
+        }
+      })
+      .catch(function(error) {
+        fullImageText.innerHTML = '<div class="alert alert-danger">' +
+          '<i class="bi bi-exclamation-triangle-fill me-2"></i>' +
+          'Błąd: ' + error.message +
+          '</div>';
+      });
+    }
+
+    // Funkcja synchronizacji z serwerem przy ładowaniu strony
+    async function syncWithServer() {
+      try {
+        const response = await fetch(`/api/document/${docId}/ocr-text`);
+        const result = await response.json();
+        
+        if (result.success && result.has_ocr) {
+          // Jeśli serwer ma tekst OCR, użyj go zamiast ponownego generowania
+          currentFullImageOcr = result.text;
+          updateDisplayText(result.text);
+          
+          // Pokaż info o synchronizacji (tylko jeśli tekst był już wyświetlany)
+          if (fullImageText.textContent.trim()) {
+            showSyncInfo();
+          }
+          
+          return true; // Oznacza że znaleziono tekst na serwerze
+        }
+        return false; // Brak tekstu na serwerze
+      } catch (error) {
+        console.warn('Nie udało się zsynchronizować z serwerem:', error);
+        return false;
       }
     }
 
-    // Poprzednia strona
-    prevPageBtn.addEventListener('click', function() {
-      if (pageNum <= 1) {
-        return;
-      }
-      pageNum--;
-      queueRenderPage(pageNum);
-      // Ukryj zaznaczenie przy zmianie strony
-      hideSelection();
-    });
-
-    // Następna strona
-    nextPageBtn.addEventListener('click', function() {
-      if (pageNum >= pdfDoc.numPages) {
-        return;
-      }
-      pageNum++;
-      queueRenderPage(pageNum);
-      // Ukryj zaznaczenie przy zmianie strony
-      hideSelection();
-    });
-
-    // Funkcja do przeliczania współrzędnych z Canvas na współrzędne PDF
-    function calculatePdfCoordinates(clientX, clientY) {
-      if (!currentViewport) return {x: 0, y: 0};
+    // Funkcja do przeliczania współrzędnych z CSS na względne (0-1)
+    function calculateRelativeCoordinates(clientX, clientY) {
+      var rect = mainImage.getBoundingClientRect();
       
-      const rect = canvas.getBoundingClientRect();
-      
-      // Współczynniki skalowania - rzeczywiste wymiary canvas vs wyświetlane
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-      
-      // Oblicz współrzędne kliknięcia względem canvas
-      const canvasX = (clientX - rect.left) * scaleX;
-      const canvasY = (clientY - rect.top) * scaleY;
+      // Oblicz współrzędne kliknięcia względem obrazu
+      var imageX = clientX - rect.left;
+      var imageY = clientY - rect.top;
       
       // Zwróć znormalizowane współrzędne (0-1)
       return {
-        x: canvasX / canvas.width,
-        y: canvasY / canvas.height
+        x: Math.max(0, Math.min(1, imageX / rect.width)),
+        y: Math.max(0, Math.min(1, imageY / rect.height))
       };
     }
 
     // Obsługa zaznaczania fragmentu
-    pdfContainer.addEventListener('mousedown', function(e) {
+    imageWrapper.addEventListener('mousedown', function(e) {
+      e.preventDefault();
       // Rozpocznij zaznaczanie
       isSelecting = true;
       
-      // Pobierz pozycję kliknięcia względem kontenera z uwzględnieniem skalowania
-      const coords = calculatePdfCoordinates(e.clientX, e.clientY);
-      startX = coords.x * canvas.width;
-      startY = coords.y * canvas.height;
+      // Pobierz pozycję kliknięcia względem obrazu
+      var coords = calculateRelativeCoordinates(e.clientX, e.clientY);
+      var rect = mainImage.getBoundingClientRect();
+      startX = coords.x * rect.width;
+      startY = coords.y * rect.height;
       
       // Ukryj poprzednie zaznaczenie
       hideSelection();
     });
 
-    pdfContainer.addEventListener('mousemove', function(e) {
+    imageWrapper.addEventListener('mousemove', function(e) {
       if (!isSelecting) return;
       
-      // Pobierz aktualną pozycję kursora z uwzględnieniem skalowania
-      const coords = calculatePdfCoordinates(e.clientX, e.clientY);
-      endX = coords.x * canvas.width;
-      endY = coords.y * canvas.height;
+      // Pobierz aktualną pozycję kursora
+      var coords = calculateRelativeCoordinates(e.clientX, e.clientY);
+      var rect = mainImage.getBoundingClientRect();
+      endX = coords.x * rect.width;
+      endY = coords.y * rect.height;
       
       // Oblicz wymiary prostokąta zaznaczenia
-      const left = Math.min(startX, endX);
-      const top = Math.min(startY, endY);
-      const width = Math.abs(endX - startX);
-      const height = Math.abs(endY - startY);
+      var left = Math.min(startX, endX);
+      var top = Math.min(startY, endY);
+      var width = Math.abs(endX - startX);
+      var height = Math.abs(endY - startY);
       
-      // Pokaż zaznaczenie (stosując odpowiednie skalowanie do CSS)
-      const rect = canvas.getBoundingClientRect();
-      const cssScaleX = rect.width / canvas.width;
-      const cssScaleY = rect.height / canvas.height;
-      
-      selectionOverlay.style.left = `${left * cssScaleX}px`;
-      selectionOverlay.style.top = `${top * cssScaleY}px`;
-      selectionOverlay.style.width = `${width * cssScaleX}px`;
-      selectionOverlay.style.height = `${height * cssScaleY}px`;
+      // Pokaż zaznaczenie
+      selectionOverlay.style.left = left + 'px';
+      selectionOverlay.style.top = top + 'px';
+      selectionOverlay.style.width = width + 'px';
+      selectionOverlay.style.height = height + 'px';
       selectionOverlay.style.display = 'block';
     });
 
-    pdfContainer.addEventListener('mouseup', function(e) {
+    imageWrapper.addEventListener('mouseup', function(e) {
       if (!isSelecting) return;
       
       // Zakończ zaznaczanie
       isSelecting = false;
       
-      // Pobierz ostateczną pozycję kursora z uwzględnieniem skalowania
-      const coords = calculatePdfCoordinates(e.clientX, e.clientY);
-      endX = coords.x * canvas.width;
-      endY = coords.y * canvas.height;
+      // Pobierz ostateczną pozycję kursora
+      var coords = calculateRelativeCoordinates(e.clientX, e.clientY);
+      var rect = mainImage.getBoundingClientRect();
+      endX = coords.x * rect.width;
+      endY = coords.y * rect.height;
       
       // Jeśli zaznaczenie jest zbyt małe, ignoruj je
       if (Math.abs(endX - startX) < 10 || Math.abs(endY - startY) < 10) {
@@ -472,10 +389,11 @@
       }
       
       // Oblicz współrzędne normalizowane (0-1)
-      const normX1 = Math.min(startX, endX) / canvas.width;
-      const normY1 = Math.min(startY, endY) / canvas.height;
-      const normX2 = Math.max(startX, endX) / canvas.width;
-      const normY2 = Math.max(startY, endY) / canvas.height;
+      var rectImage = mainImage.getBoundingClientRect();
+      var normX1 = Math.min(startX, endX) / rectImage.width;
+      var normY1 = Math.min(startY, endY) / rectImage.height;
+      var normX2 = Math.max(startX, endX) / rectImage.width;
+      var normY2 = Math.max(startY, endY) / rectImage.height;
       
       console.log("Współrzędne zaznaczenia (0-1):", {
         x1: normX1, y1: normY1, x2: normX2, y2: normY2
@@ -491,8 +409,8 @@
       ocrLoader.classList.remove('d-none');
       
       // Przygotuj dane do wysłania
-      const data = {
-        page: pageNum,
+      var data = {
+        page: 1, // Obrazy mają zawsze 1 "stronę"
         x1: x1, 
         y1: y1, 
         x2: x2, 
@@ -501,15 +419,15 @@
       };
       
       // Wyślij zapytanie do API
-      fetch(`/api/document/${docId}/ocr-selection`, {
+      fetch('/api/document/' + docId + '/ocr-selection', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(data)
       })
-      .then(response => response.json())
-      .then(data => {
+      .then(function(response) { return response.json(); })
+      .then(function(data) {
         // Ukryj loader
         ocrLoader.classList.add('d-none');
         
@@ -518,15 +436,15 @@
           showFragmentTextModal(data.text);
         } else {
           // Pokaż błąd w modalu
-          showFragmentTextModal(`Błąd: ${data.error || 'Nie udało się rozpoznać tekstu z fragmentu'}`);
+          showFragmentTextModal('Błąd: ' + (data.error || 'Nie udało się rozpoznać tekstu z fragmentu'));
         }
       })
-      .catch(error => {
+      .catch(function(error) {
         // Ukryj loader
         ocrLoader.classList.add('d-none');
         
         // Pokaż błąd w modalu
-        showFragmentTextModal(`Błąd: ${error.message}`);
+        showFragmentTextModal('Błąd: ' + error.message);
       });
     }
 
@@ -538,34 +456,8 @@
     // Funkcja wyświetlająca modal z tekstem fragmentu
     function showFragmentTextModal(text) {
       document.getElementById('fragmentTextContent').textContent = text;
-      const modal = new bootstrap.Modal(document.getElementById('fragmentTextModal'));
+      var modal = new bootstrap.Modal(document.getElementById('fragmentTextModal'));
       modal.show();
-    }
-
-    // Funkcja synchronizacji z serwerem przy ładowaniu strony
-    async function syncWithServer() {
-      try {
-        const response = await fetch(`/api/document/${docId}/ocr-text`);
-        const result = await response.json();
-        
-        if (result.success && result.has_ocr) {
-          // Jeśli serwer ma tekst OCR, użyj go zamiast ponownego generowania
-          ocrText[pageNum] = result.text;
-          updateDisplayText(result.text);
-          currentFullPageOcr = result.text;
-          
-          // Pokaż info o synchronizacji (tylko jeśli tekst był już wyświetlany)
-          if (fullPageText.textContent.trim()) {
-            showSyncInfo();
-          }
-          
-          return true; // Oznacza że znaleziono tekst na serwerze
-        }
-        return false; // Brak tekstu na serwerze
-      } catch (error) {
-        console.warn('Nie udało się zsynchronizować z serwerem:', error);
-        return false;
-      }
     }
 
     // Funkcje do obsługi edycji tekstu
@@ -633,18 +525,18 @@
       originalText = text;
     }
 
-    // Obsługa kopiowania pełnego tekstu strony
+    // Obsługa kopiowania pełnego tekstu obrazu
     copyFullBtn.addEventListener('click', function() {
-      const textToCopy = fullPageText.textContent.trim();
+      var textToCopy = fullImageText.textContent.trim();
       
       copyTextToClipboard(textToCopy, function() {
         // Zmień wygląd przycisku na chwilę
-        const originalText = copyFullBtn.innerHTML;
+        var originalText = copyFullBtn.innerHTML;
         copyFullBtn.innerHTML = '<i class="bi bi-check2"></i> Skopiowano!';
         copyFullBtn.classList.add('btn-success');
         copyFullBtn.classList.remove('btn-outline-secondary');
         
-        setTimeout(() => {
+        setTimeout(function() {
           copyFullBtn.innerHTML = originalText;
           copyFullBtn.classList.remove('btn-success');
           copyFullBtn.classList.add('btn-outline-secondary');
@@ -656,6 +548,11 @@
     window.addEventListener('resize', function() {
       // Ukryj zaznaczenie przy zmianie rozmiaru okna
       hideSelection();
+    });
+
+    // Zapobiegnij przeciąganiu obrazu
+    mainImage.addEventListener('dragstart', function(e) {
+      e.preventDefault();
     });
 
     // Obsługa skrótów klawiszowych
@@ -790,7 +687,7 @@
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text)
           .then(successCallback)
-          .catch(error => {
+          .catch(function(error) {
             console.error('Błąd kopiowania przez Clipboard API:', error);
             // Metoda 2: Fallback - użyj elementu textarea
             fallbackCopyTextToClipboard(text, successCallback);
@@ -805,7 +702,7 @@
     function fallbackCopyTextToClipboard(text, successCallback) {
       try {
         // Utwórz tymczasowy element textarea
-        const textarea = document.createElement('textarea');
+        var textarea = document.createElement('textarea');
         textarea.value = text;
         
         // Ustaw styl, aby element był niewidoczny
@@ -819,7 +716,7 @@
         textarea.select();
         
         // Wykonaj polecenie kopiowania
-        const successful = document.execCommand('copy');
+        var successful = document.execCommand('copy');
         
         // Usuń tymczasowy element
         document.body.removeChild(textarea);
@@ -935,11 +832,11 @@
     // Zaktualizowana funkcja addToFullText
     window.addToFullText = async function() {
       const fragmentText = document.getElementById('fragmentTextContent').textContent;
-      const currentFullText = fullPageText.textContent;
+      const currentFullText = fullImageText.textContent;
       
       // Przygotuj nowy tekst - dodaj fragment do istniejącego
       let newFullText;
-      if (currentFullText && currentFullText.trim() && !currentFullText.includes('Brak pełnego OCR')) {
+      if (currentFullText && currentFullText.trim() && currentFullText.indexOf('Brak pełnego OCR') === -1) {
         newFullText = currentFullText + '\n\n--- Dodany fragment ---\n' + fragmentText;
       } else {
         newFullText = fragmentText;
@@ -975,8 +872,8 @@
           // Aktualizuj lokalny tekst
           updateDisplayText(newFullText);
           
-          // Zaktualizuj cache OCR dla tej strony
-          ocrText[pageNum] = newFullText;
+          // Zapisz aktualny OCR w zmiennej globalnej
+          currentFullImageOcr = newFullText;
           
           // Zamknij modal
           modal.hide();
@@ -1016,6 +913,8 @@
       });
     };
 
+    // Inicjalizacja po załadowaniu obrazu
+    waitForImageLoad();
   });
 </script>
 

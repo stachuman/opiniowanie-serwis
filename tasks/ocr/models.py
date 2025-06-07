@@ -72,45 +72,33 @@ def _pick_best_gpu(threshold_gb: int) -> int | None:
 
 @lru_cache(maxsize=1)
 def _load_once() -> Tuple[AutoModelForVision2Seq, AutoProcessor]:
-    """Ładuje model i processor dokładnie raz."""
-
-    strategy = CFG_STRATEGY  # lokalna kopia
+    strategy = CFG_STRATEGY
 
     if strategy == "single" and GPU_SELECT_MODE == "auto":
         gpu = _pick_best_gpu(GPU_MEM_LIMIT_GB)
-        if gpu is not None:
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
-            free = torch.cuda.mem_get_info(0)[0] / 1e9
-            logger.info(f"Wybrano GPU {gpu} (wolne ≈ {free:.1f} GB)")
-        else:
-            logger.warning("Brak karty z ≥ % s GB – przełączam na device_map='auto'", GPU_MEM_LIMIT_GB)
+        if gpu is None:
+            logger.warning("Brak karty ≥%s GB – przełączam na device_map='auto'", GPU_MEM_LIMIT_GB)
             strategy = "auto"
+    else:
+        gpu = 0
 
-    params: Dict[str, Any] = {
-        "torch_dtype": torch.float16,
-        "trust_remote_code": True,
-    }
+    params: Dict[str, Any] = {"torch_dtype": torch.float16, "trust_remote_code": True}
     if strategy == "single":
-        params.update({"device_map": None, "max_memory": {0: f"{GPU_MEM_LIMIT_GB}GiB"}})
+        params["device_map"] = gpu                # ← kluczowa linia
+        params["max_memory"] = {gpu: f"{GPU_MEM_LIMIT_GB}GiB"}
     else:
         params["device_map"] = "auto"
 
+    logger.info("Ładowanie modelu z parametrami: %s", params)
     try:
         model = AutoModelForVision2Seq.from_pretrained(OCR_MODEL_PATH, **params).eval()
     except torch.cuda.OutOfMemoryError:
-        logger.warning("OOM – ponawiam z device_map='auto'")
+        logger.warning("OOM – ponawiam z device_map='auto'")
         params.pop("max_memory", None)
         params["device_map"] = "auto"
         model = AutoModelForVision2Seq.from_pretrained(OCR_MODEL_PATH, **params).eval()
 
     processor = AutoProcessor.from_pretrained(OCR_MODEL_PATH)
-
-    if strategy == "single":
-        model.to(torch.device("cuda"))
-        if torch.cuda.get_device_capability()[0] == 8:
-            model.config.attn_implementation = "eager"
-        logger.info("Model na GPU %s – gotowy", torch.cuda.current_device())
-
     return model, processor
 
 

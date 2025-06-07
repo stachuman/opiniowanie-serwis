@@ -110,8 +110,8 @@ async def process_document(doc_id, model=None, proc=None):
                 session.commit()
                 
                 # Przygotuj instrukcję
-                if doc.sygnatura:
-                    instruction += f" Document reference number: {doc.sygnatura}."
+                #if doc.sygnatura:
+                #    instruction += f" Document reference number: {doc.sygnatura}."
                 
                 # Aktualizuj postęp
                 doc.ocr_progress = 0.5
@@ -187,8 +187,8 @@ async def process_document(doc_id, model=None, proc=None):
                         img.save(img_path, "PNG")
                         
                         # Przygotuj instrukcję
-                        if doc.sygnatura:
-                            instruction += f" Document reference number: {doc.sygnatura}. Page {page_number} of {total_pages}."
+                        #if doc.sygnatura:
+                        #    instruction += f" Document reference number: {doc.sygnatura}. Page {page_number} of {total_pages}."
                         
                         logger.info(f"Wykonuję OCR dla strony {page_number}/{total_pages}")
                         

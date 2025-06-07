@@ -74,9 +74,17 @@
 
   <!-- Klikalny wiersz tabeli -->
   <script>
-    document.querySelectorAll('tr[data-href]').forEach(row => {
-      row.addEventListener('click', () => window.location = row.dataset.href);
+  document.querySelectorAll('tr[data-href]').forEach(row => {
+    row.addEventListener('click', function(e) {
+      // Nie nawiguj, jeśli kliknięto przycisk lub wewnątrz przycisku
+      if (e.target.closest('button') || e.target.closest('a') || e.target.tagName === 'BUTTON' || e.target.tagName === 'A') {
+        return;
+      }
+      window.location = row.dataset.href;
     });
+  });
+
+
   </script>
 
   {% block scripts %}{% endblock %}

@@ -52,11 +52,76 @@
       
       <div class="d-flex justify-content-end mt-4">
         <a href="{{ url_for('opinion_detail', doc_id=opinion.id) }}" class="btn btn-outline-secondary me-2">Anuluj</a>
-        <button type="submit" class="btn btn-primary">
+        <button type="submit" class="btn btn-primary" id="submitButton">
           <i class="bi bi-upload me-1"></i> Wyślij pliki
         </button>
       </div>
     </form>
+    
+    <!-- Element dla wskaźnika ładowania - domyślnie ukryty -->
+    <div id="processingIndicator" style="display: none;" class="mt-4">
+      <div class="card bg-light">
+        <div class="card-body text-center py-4">
+          <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
+            <span class="visually-hidden">Ładowanie...</span>
+          </div>
+          <h5>Dokumenty zostały wgrane</h5>
+          <p id="processingMessage">
+            Rozpoznawanie tekstu w toku. Proszę czekać.
+            Przetwarzanie dokumentów może potrwać od kilkunastu sekund do kilku minut,
+            w zależności od rozmiaru i złożoności.
+          </p>
+          <p class="text-muted small">
+            Zostaniesz automatycznie przekierowany do opinii po zakończeniu przetwarzania.
+          </p>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const form = document.getElementById('uploadForm');
+  const submitButton = document.getElementById('submitButton');
+  const processingIndicator = document.getElementById('processingIndicator');
+  const processingMessage = document.getElementById('processingMessage');
+  const runOcrCheckbox = document.getElementById('run_ocr');
+  const filesInput = document.getElementById('files');
+  
+  form.addEventListener('submit', function() {
+    // Sprawdź czy OCR jest włączony i czy wybrano pliki
+    const ocrEnabled = runOcrCheckbox.checked;
+    const files = filesInput.files;
+    
+    if (ocrEnabled && files.length > 0) {
+      // Dostosuj komunikat w zależności od liczby plików
+      let message;
+      if (files.length === 1) {
+        message = `Rozpoznawanie tekstu z dodanego dokumentu w toku. Proszę czekać.
+                  Przetwarzanie może potrwać od kilkunastu sekund do kilku minut,
+                  w zależności od rozmiaru i złożoności.`;
+      } else {
+        message = `Rozpoznawanie tekstu z ${files.length} dodanych dokumentów w toku. Proszę czekać.
+                  Przetwarzanie może potrwać od kilkunastu sekund do kilku minut,
+                  w zależności od rozmiaru i złożoności.`;
+      }
+      
+      // Aktualizuj komunikat
+      processingMessage.textContent = message;
+      
+      // Ukryj przycisk i pokaż wskaźnik przetwarzania
+      submitButton.disabled = true;
+      processingIndicator.style.display = 'block';
+      
+      // Przewiń do wskaźnika przetwarzania
+      processingIndicator.scrollIntoView({ behavior: 'smooth' });
+    } else if (!ocrEnabled) {
+      // Jeśli OCR jest wyłączony, tylko wyłącz przycisk na chwilę
+      submitButton.disabled = true;
+      submitButton.innerHTML = '<i class="bi bi-upload me-1"></i> Wysyłanie...';
+    }
+  });
+});
+</script>
 {% endblock %}

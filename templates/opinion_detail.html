@@ -73,7 +73,7 @@
       <div class="row mb-3">
         <div class="col-12">
           <label class="form-label">Komentarze/uwagi</label>
-          <textarea name="comments" class="form-control" rows="3">{{ opinion.comments or '' }}</textarea>
+          <textarea name="note" class="form-control" rows="3">{{ opinion.note or '' }}</textarea>
         </div>
       </div>
       
@@ -116,7 +116,7 @@
             
             <div class="btn-group">
               <a href="{{ url_for('document_download', doc_id=opinion.id) }}" class="btn btn-outline-secondary">
-                <i class="bi bi-download"></i> Pobierz dokument
+                <i class="bi bi-download"></i> Pobierz dokument opinii (Word)
               </a>
               
               <!-- Przycisk usuwania opinii -->
@@ -225,6 +225,7 @@
                     <thead class="table-light">
                       <tr>
                         <th>Nazwa pliku</th>
+                        <th>Notatka</th>
                         <th class="text-center">Typ</th>
                         <th class="text-center">OCR</th>
                         <th>Data dodania</th>
@@ -233,21 +234,39 @@
                     </thead>
                     <tbody>
                       {% for doc in docs %}
-                        <tr>
-                          <td>{{ doc.original_filename }}</td>
-                          <td class="text-center">
-                            {% if doc.mime_type and doc.mime_type.startswith('image/') %}
-                              <i class="bi bi-file-earmark-image text-info" title="Obraz"></i>
-                            {% elif doc.mime_type == 'application/pdf' %}
-                              <i class="bi bi-file-earmark-pdf text-danger" title="PDF"></i>
-                            {% elif doc.mime_type and doc.mime_type.startswith('application/') and 'word' in doc.mime_type %}
-                              <i class="bi bi-file-earmark-word text-primary" title="Word"></i>
-                            {% elif doc.mime_type == 'text/plain' %}
-                              <i class="bi bi-file-earmark-text text-secondary" title="TXT"></i>
-                            {% else %}
-                              <i class="bi bi-file-earmark" title="Dokument"></i>
-                            {% endif %}
-                          </td>
+<!-- Zmodyfikowany fragment wiersza tabeli z dokumentami -->
+<tr>
+  <td>{{ doc.original_filename }}</td>
+  <td>
+    {% if doc.note %}
+      <span class="text-muted">{{ doc.note }}</span>
+    {% else %}
+      <span class="text-muted small"><em>Brak notatki</em></span>
+    {% endif %}
+    <button type="button" class="btn btn-sm btn-outline-secondary ms-2 py-0 px-1" 
+            data-doc-id="{{ doc.id }}" 
+            data-bs-toggle="modal" 
+            data-bs-target="#noteEditModal"
+            title="Edytuj notatkę">
+      <i class="bi bi-pencil-square"></i>
+    </button>
+    <!-- Ukryte pole zawierające treść notatki -->
+    <div id="note-content-{{ doc.id }}" style="display: none;">{{ doc.note|default('', true) }}</div>
+  </td>
+  <td class="text-center">
+    {% if doc.mime_type and doc.mime_type.startswith('image/') %}
+      <i class="bi bi-file-earmark-image text-info" title="Obraz"></i>
+    {% elif doc.mime_type == 'application/pdf' %}
+      <i class="bi bi-file-earmark-pdf text-danger" title="PDF"></i>
+    {% elif doc.mime_type and doc.mime_type.startswith('application/') and 'word' in doc.mime_type %}
+      <i class="bi bi-file-earmark-word text-primary" title="Word"></i>
+    {% elif doc.mime_type == 'text/plain' %}
+      <i class="bi bi-file-earmark-text text-secondary" title="TXT"></i>
+    {% else %}
+      <i class="bi bi-file-earmark" title="Dokument"></i>
+    {% endif %}
+  </td>
+
                           <td class="text-center">
                             {% if doc.ocr_status == 'done' %}
                               <span class="badge bg-success p-2">
@@ -277,44 +296,67 @@
                             {% endif %}
                           </td>
                           <td>{{ doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</td>
-                          <td class="text-end document-actions" data-doc-id="{{ doc.id }}" data-doc-name="{{ doc.original_filename }}">
-                            <div class="d-flex flex-nowrap gap-1">
-                              <!-- Przycisk szybkiego podglądu -->
-                              <button type="button" class="btn btn-sm btn-outline-info px-2" 
-                                onclick="event.preventDefault(); event.stopPropagation(); quickPreview('{{ doc.id }}', '{{ doc.original_filename }}');" 
-                                title="Szybki podgląd">
-                                <i class="bi bi-eye"></i>
-                              </button>
-                              
-                              <!-- Przycisk uruchamiania OCR -->
-                              {% if doc.mime_type and (doc.mime_type == 'application/pdf' or doc.mime_type.startswith('image/')) and doc.ocr_status != 'running' %}
-                                <form action="{{ url_for('document_run_ocr', doc_id=doc.id) }}" method="post" class="d-inline">
-                                  <button type="submit" class="btn btn-sm btn-outline-warning px-2" title="Uruchom OCR">
-                                    <i class="bi bi-magic"></i>
-                                  </button>
-                                </form>
-                              {% endif %}
-                              
-                              <!-- Przycisk zaawansowanego podglądu PDF -->
-                              {% if doc.mime_type == 'application/pdf' %}
-                                <a href="{{ url_for('document_pdf_viewer', doc_id=doc.id) }}" class="btn btn-sm btn-outline-success px-2" title="Zaawansowany podgląd">
-                                  <i class="bi bi-search"></i>
-                                </a>
-                              {% endif %}
-                              
-                              <!-- Przycisk pobierania -->
-                              <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-sm btn-outline-secondary px-2" title="Pobierz dokument">
-                                <i class="bi bi-download"></i>
-                              </a>
-                              
-                              <!-- Przycisk podglądu tekstu -->
-                              {% if doc.ocr_status == 'done' or doc.mime_type == 'text/plain' or (doc.original_filename and doc.original_filename.lower().endswith('.txt')) %}
-                                <a href="{{ url_for('document_text_preview', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary px-2" title="Podgląd tekstu">
-                                  <i class="bi bi-file-earmark-text"></i>
-                                </a>
-                              {% endif %}
-                            </div>
-                          </td>
+
+<td class="text-end document-actions" data-doc-id="{{ doc.id }}" data-doc-name="{{ doc.original_filename }}">
+  <div class="d-flex flex-nowrap gap-1">
+    <!-- Przycisk szybkiego podglądu -->
+    <button type="button" class="btn btn-sm btn-outline-info px-2" 
+      onclick="event.preventDefault(); event.stopPropagation(); quickPreview('{{ doc.id }}', '{{ doc.original_filename }}');" 
+      title="Szybki podgląd">
+      <i class="bi bi-eye"></i>
+    </button>
+    
+    <!-- NOWY: Przycisk podsumowania LLM (tylko dla dokumentów z OCR) -->
+    {% if doc.ocr_status == 'done' %}
+      <a href="{{ url_for('document_summarize_form', doc_id=doc.id) }}" 
+         class="btn btn-sm btn-outline-success px-2" 
+         title="Generuj podsumowanie AI">
+        <i class="bi bi-robot"></i>
+      </a>
+      <!-- Alternatywnie: przycisk modalny dla szybkiego podsumowania -->
+      <button type="button" class="btn btn-sm btn-outline-warning px-2" 
+              onclick="event.preventDefault(); event.stopPropagation(); quickSummarize('{{ doc.id }}', '{{ doc.original_filename }}');" 
+              title="Szybkie podsumowanie AI">
+        <i class="bi bi-stars"></i>
+      </button>
+    {% endif %}
+    
+    <!-- Przycisk uruchamiania OCR -->
+    {% if doc.mime_type and (doc.mime_type == 'application/pdf' or doc.mime_type.startswith('image/')) and doc.ocr_status != 'running' %}
+      <form action="{{ url_for('document_run_ocr', doc_id=doc.id) }}" method="post" class="d-inline">
+        <button type="submit" class="btn btn-sm btn-outline-warning px-2" title="Uruchom OCR">
+          <i class="bi bi-magic"></i>
+        </button>
+      </form>
+    {% endif %}
+    
+    <!-- Przycisk zaawansowanego podglądu PDF -->
+    {% if doc.mime_type == 'application/pdf' %}
+      <a href="{{ url_for('document_pdf_viewer', doc_id=doc.id) }}" class="btn btn-sm btn-outline-success px-2" title="Zaawansowany podgląd PDF">
+        <i class="bi bi-search"></i>
+      </a>
+    {% elif doc.mime_type and doc.mime_type.startswith('image/') %}
+      <a href="{{ url_for('document_image_viewer', doc_id=doc.id) }}" class="btn btn-sm btn-outline-success px-2" title="Zaawansowany podgląd obrazu">
+        <i class="bi bi-search"></i>
+      </a>
+    {% endif %}
+
+    <!-- Przycisk pobierania -->
+    <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-sm btn-outline-secondary px-2" title="Pobierz dokument">
+      <i class="bi bi-download"></i>
+    </a>
+    
+    <!-- Przycisk podglądu tekstu -->
+    {% if doc.ocr_status == 'done' and doc.mime_type == 'text/plain' or (doc.original_filename and doc.original_filename.lower().endswith('.txt')) %}
+      <a href="{{ url_for('document_text_preview', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary px-2" title="Podgląd tekstu">
+        <i class="bi bi-file-earmark-text"></i>
+      </a>
+    {% endif %}
+  </div>
+</td>
+
+
+
                         </tr>
                       {% endfor %}
                     </tbody>
@@ -385,6 +427,146 @@
     </div>
   </div>
 </div>
+
+<!-- Modal do edycji notatki -->
+<div class="modal fade" id="noteEditModal" tabindex="-1" aria-labelledby="noteEditModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="noteEditModalLabel">
+          <i class="bi bi-sticky-fill me-2"></i>Edycja notatki
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="noteForm" method="post">
+          <input type="hidden" id="noteDocId" name="doc_id" value="">
+          <div class="mb-3">
+            <label for="noteContent" class="form-label">Notatka do dokumentu</label>
+            <textarea class="form-control" id="noteContent" name="note" rows="5" 
+                      placeholder="Wprowadź notatkę dotyczącą tego dokumentu..."></textarea>
+          </div>
+          <div class="d-flex justify-content-end">
+            <button type="button" class="btn btn-outline-secondary me-2" data-bs-dismiss="modal">Anuluj</button>
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-save me-1"></i>Zapisz notatkę
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal szybkiego podsumowania AI -->
+<div class="modal fade" id="quickSummaryModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="summaryModalTitle">
+          <i class="bi bi-robot me-2"></i>Podsumowanie AI
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="summaryModalBody">
+        <!-- Formularz szybkiej instrukcji -->
+        <div id="summaryFormArea">
+          <div class="mb-3">
+            <label for="quickInstruction" class="form-label">
+              Instrukcja dla AI <small class="text-muted">(opcjonalna)</small>
+            </label>
+            <textarea class="form-control" id="quickInstruction" rows="4" 
+                      placeholder="Pozostaw puste aby użyć domyślnej instrukcji lub wprowadź własną..."></textarea>
+          </div>
+          
+          <!-- Opcje zapisu do notatki -->
+          <div class="card bg-light mb-3">
+            <div class="card-body py-2">
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="quickSaveToNote" checked>
+                <label class="form-check-label" for="quickSaveToNote">
+                  <strong>Zapisz do notatki dokumentu</strong>
+                </label>
+              </div>
+              
+              <div id="quickNoteOptions" class="ms-3">
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="radio" name="quickNoteMode" id="quickNoteAppend" value="append" checked>
+                  <label class="form-check-label" for="quickNoteAppend">Dodaj na końcu</label>
+                </div>
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="radio" name="quickNoteMode" id="quickNotePrepend" value="prepend">
+                  <label class="form-check-label" for="quickNotePrepend">Dodaj na początku</label>
+                </div>
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="radio" name="quickNoteMode" id="quickNoteReplace" value="replace">
+                  <label class="form-check-label" for="quickNoteReplace">Zastąp</label>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="d-flex justify-content-between">
+            <div>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadQuickDefaultInstruction()">
+                <i class="bi bi-arrow-clockwise"></i> Domyślna instrukcja
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-info" onclick="loadMedicalInstruction()">
+                <i class="bi bi-heart-pulse"></i> Instrukcja medyczna
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-warning" onclick="loadLegalInstruction()">
+                <i class="bi bi-scales"></i> Instrukcja prawna
+              </button>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="generateQuickSummary()">
+              <i class="bi bi-magic"></i> Generuj podsumowanie
+            </button>
+          </div>
+        </div>
+        
+        <!-- Obszar ładowania -->
+        <div id="summaryLoadingArea" style="display: none;">
+          <div class="text-center py-4">
+            <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
+              <span class="visually-hidden">Ładowanie...</span>
+            </div>
+            <h5>Generowanie podsumowania...</h5>
+            <p class="text-muted">AI analizuje dokument. To może potrwać chwilę.</p>
+          </div>
+        </div>
+        
+        <!-- Obszar wyniku -->
+        <div id="summaryResultArea" style="display: none;">
+          <div class="alert alert-success">
+            <div id="summaryResultContent"></div>
+          </div>
+          <div class="d-flex justify-content-end gap-2">
+            <button type="button" class="btn btn-outline-secondary" onclick="copySummaryToClipboard()">
+              <i class="bi bi-clipboard"></i> Kopiuj
+            </button>
+            <button type="button" class="btn btn-outline-primary" onclick="generateAnotherQuick()">
+              <i class="bi bi-arrow-repeat"></i> Generuj ponownie
+            </button>
+            <a href="#" id="fullSummaryLink" class="btn btn-outline-info">
+              <i class="bi bi-arrows-fullscreen"></i> Pełny edytor
+            </a>
+          </div>
+        </div>
+        
+        <!-- Obszar błędu -->
+        <div id="summaryErrorArea" style="display: none;">
+          <div class="alert alert-danger">
+            <div id="summaryErrorContent"></div>
+          </div>
+          <button type="button" class="btn btn-outline-danger" onclick="generateQuickSummary()">
+            <i class="bi bi-arrow-repeat"></i> Spróbuj ponownie
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -393,11 +575,45 @@
 {% if has_active_ocr %}
 (function() {
   // Odświeżaj stronę co 10 sekund, jeśli mamy dokumenty w trakcie przetwarzania
-  setTimeout(function() {
-    location.reload();
-  }, 10000);
+  //setTimeout(function() {
+  //  location.reload();
+  //}, 10000);
 })();
 {% endif %}
+document.addEventListener('DOMContentLoaded', function() {
+  // Przypisz event listenery do wszystkich przycisków edycji
+  document.querySelectorAll('[data-bs-target="#noteEditModal"]').forEach(function(button) {
+    button.addEventListener('click', function() {
+      const docId = this.getAttribute('data-doc-id');
+      const noteContent = document.getElementById('note-content-' + docId).textContent;
+      
+      document.getElementById('noteDocId').value = docId;
+      document.getElementById('noteContent').value = noteContent;
+      document.getElementById('noteForm').action = '/document/' + docId + '/update-note';
+      
+      // Ręczne otwieranie modala (zapasowo, gdyby data-bs-* nie działały)
+      const modal = new bootstrap.Modal(document.getElementById('noteEditModal'));
+      modal.show();
+    });
+  });
+});
+
+
+  function prepareNoteEdit(button) {
+    // Pobierz ID dokumentu z atrybutu data-doc-id
+    const docId = button.getAttribute('data-doc-id');
+    
+    // Pobierz treść notatki z ukrytego elementu
+    const noteContent = document.getElementById(`note-content-${docId}`).textContent;
+    
+    // Ustaw wartości w formularzu
+    document.getElementById('noteDocId').value = docId;
+    document.getElementById('noteContent').value = noteContent;
+    
+    // Ustaw akcję formularza
+    document.getElementById('noteForm').action = `/document/${docId}/update-note`;
+  }
+
 
 // Funkcja do szybkiego podglądu dokumentu
 function quickPreview(docId, docName) {
@@ -449,6 +665,253 @@ function quickPreview(docId, docName) {
         `;
       });
   }
+}
+
+
+// Zmienne globalne dla modalu podsumowania
+let currentSummaryDocId = null;
+let currentSummaryDocName = null;
+
+// Instrukcje szybkie
+const quickInstructions = {
+  default: `Przeanalizuj poniższy dokument i przygotuj zwięzłe podsumowanie w języku polskim. 
+
+Podsumowanie powinno zawierać:
+1. **Główną tematykę** - o czym jest dokument
+2. **Kluczowe informacje** - najważniejsze fakty, daty, osoby
+3. **Wnioski lub zalecenia** - jeśli są zawarte w dokumencie
+
+Zachowaj profesjonalny ton i skup się na merytorycznych aspektach. Maksymalnie 300 słów.`,
+
+  medical: `Przeanalizuj ten dokument medyczny i przygotuj strukturalne podsumowanie:
+
+1. **Dane pacjenta** - podstawowe informacje
+2. **Rozpoznanie** - główna diagnoza 
+3. **Objawy** - zgłaszane dolegliwości
+4. **Badania** - wykonane badania i wyniki
+5. **Leczenie** - zalecenia i leki
+6. **Rokowania** - przewidywany przebieg
+
+Zachowaj medyczną terminologię i podaj konkretne daty.`,
+
+  legal: `Przeprowadź analizę prawną tego dokumentu:
+
+1. **Charakter dokumentu** - rodzaj pisma prawnego
+2. **Strony postępowania** - podmioty uczestniczące  
+3. **Przedmiot sprawy** - czego dotyczy
+4. **Podstawy prawne** - przywołane przepisy
+5. **Kluczowe ustalenia** - istotne fakty
+6. **Wnioski** - podsumowanie stanowiska
+
+Skup się na aspektach merytorycznych i prawnych.`
+};
+
+function quickSummarize(docId, docName) {
+  currentSummaryDocId = docId;
+  currentSummaryDocName = docName;
+  
+  // Ustaw tytuł
+  document.getElementById('summaryModalTitle').innerHTML = `<i class="bi bi-robot me-2"></i>Podsumowanie AI: ${docName}`;
+  
+  // Ustaw link do pełnego edytora
+  document.getElementById('fullSummaryLink').href = `/document/${docId}/summarize`;
+  
+  // Resetuj modal
+  resetSummaryModal();
+  
+  // Pokaż modal
+  new bootstrap.Modal(document.getElementById('quickSummaryModal')).show();
+}
+
+function resetSummaryModal() {
+  document.getElementById('summaryFormArea').style.display = 'block';
+  document.getElementById('summaryLoadingArea').style.display = 'none';
+  document.getElementById('summaryResultArea').style.display = 'none';
+  document.getElementById('summaryErrorArea').style.display = 'none';
+  document.getElementById('quickInstruction').value = '';
+}
+
+function loadQuickDefaultInstruction() {
+  document.getElementById('quickInstruction').value = quickInstructions.default;
+}
+
+function loadMedicalInstruction() {
+  document.getElementById('quickInstruction').value = quickInstructions.medical;
+}
+
+function loadLegalInstruction() {
+  document.getElementById('quickInstruction').value = quickInstructions.legal;
+}
+
+// Poprawiona funkcja generateQuickSummary w opinion_detail.html
+async function generateQuickSummary() {
+  if (!currentSummaryDocId) return;
+
+  // Parametry z formularza
+  const instruction = document.getElementById('quickInstruction').value.trim();
+  const saveToNote = document.getElementById('quickSaveToNote').checked;
+  const noteMode = document.querySelector('input[name="quickNoteMode"]:checked').value;
+
+  // UI – pokaż spinner
+  document.getElementById('summaryFormArea').style.display = 'none';
+  document.getElementById('summaryLoadingArea').style.display = 'block';
+  document.getElementById('summaryResultArea').style.display = 'none';
+  document.getElementById('summaryErrorArea').style.display = 'none';
+
+  // Przygotuj payload
+  const formData = new FormData();
+  if (instruction) formData.append('custom_instruction', instruction);
+  formData.append('save_to_note', saveToNote);
+  formData.append('note_mode', noteMode);
+
+  try {
+    // OPCJA 1: Spróbuj streaming (może nie działać z wszystkimi wersjami llama-server)
+    if (window.fetch && typeof ReadableStream !== 'undefined') {
+      try {
+        const response = await fetch(`/document/${currentSummaryDocId}/quick-summarize/stream`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        // Streamuj odpowiedź
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let fullText = '';
+
+        // Pokaż początkowy spinner z tekstem
+        document.getElementById('summaryLoadingArea').innerHTML = 
+          '<div class="text-center"><div class="spinner-border text-primary me-3"></div><span>Generowanie...</span></div><div id="liveText" class="mt-3 p-3 bg-light border-start border-success" style="white-space: pre-wrap; font-family: monospace;"></div>';
+
+        const liveTextElement = document.getElementById('liveText');
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          
+          // Sprawdź czy to błąd
+          if (chunk.startsWith('BŁĄD:') || chunk.startsWith('ERROR:')) {
+            throw new Error(chunk);
+          }
+          
+          fullText += chunk;
+
+          // Na żywo aktualizuj podgląd
+          if (liveTextElement) {
+            liveTextElement.textContent = fullText;
+            liveTextElement.scrollTop = liveTextElement.scrollHeight;
+          }
+        }
+
+        // Gotowe – przesuń do sekcji wyniku
+        document.getElementById('summaryLoadingArea').style.display = 'none';
+        document.getElementById('summaryResultArea').style.display = 'block';
+        document.getElementById('summaryResultContent').innerHTML = fullText.replace(/\n/g, '<br>');
+        
+        return; // Sukces streaming
+        
+      } catch (streamError) {
+        console.warn('Streaming nie działa, próbuję tradycyjnie:', streamError);
+        // Fallback do non-streaming
+      }
+    }
+
+  } catch (err) {
+    console.error('Błąd generowania podsumowania:', err);
+    document.getElementById('summaryLoadingArea').style.display = 'none';
+    document.getElementById('summaryErrorArea').style.display = 'block';
+    document.getElementById('summaryErrorContent').innerHTML = `
+      <div class="alert alert-danger">
+        <strong>Błąd:</strong> ${err.message}
+      </div>
+      <details class="mt-2">
+        <summary>Szczegóły techniczne</summary>
+        <pre class="bg-light p-2 mt-2 small">${err.stack || err.toString()}</pre>
+      </details>
+    `;
+  }
+}
+
+// Dodatkowa funkcja debugowania LLM (dodaj do konsoli przeglądarki)
+async function debugLLMConnection() {
+  try {
+    console.log('Testowanie połączenia z LLM...');
+    const response = await fetch('/api/llm/test-connection');
+    const result = await response.json();
+    console.log('Wynik testu LLM:', result);
+    
+    if (result.success) {
+      console.log('✅ LLM działa');
+      
+      // Testuj proste podsumowanie
+      console.log('Testowanie prostego podsumowania...');
+      const testFormData = new FormData();
+      testFormData.append('custom_instruction', 'Bardzo krótko podsumuj: to jest test');
+      testFormData.append('save_to_note', 'false');
+      
+      const summaryResponse = await fetch(`/document/${currentSummaryDocId}/quick-summarize`, {
+        method: 'POST',
+        body: testFormData,
+      });
+      
+      const summaryResult = await summaryResponse.json();
+      console.log('Wynik podsumowania:', summaryResult);
+    } else {
+      console.log('❌ LLM nie działa:', result.error);
+    }
+  } catch (error) {
+    console.error('Błąd debugowania LLM:', error);
+  }
+}
+
+// Wywołaj w konsoli: debugLLMConnection() gdy currentSummaryDocId jest ustawione
+
+// Obsługa checkbox "Zapisz do notatki" w szybkim podsumowaniu
+document.addEventListener('DOMContentLoaded', function() {
+  const quickSaveToNote = document.getElementById('quickSaveToNote');
+  const quickNoteOptions = document.getElementById('quickNoteOptions');
+  
+  if (quickSaveToNote && quickNoteOptions) {
+    quickSaveToNote.addEventListener('change', function() {
+      if (this.checked) {
+        quickNoteOptions.style.display = 'block';
+      } else {
+        quickNoteOptions.style.display = 'none';
+      }
+    });
+  }
+});
+
+function generateAnotherQuick() {
+  document.getElementById('summaryResultArea').style.display = 'none';
+  document.getElementById('summaryFormArea').style.display = 'block';
+}
+
+function copySummaryToClipboard() {
+  const summaryText = document.getElementById('summaryResultContent').innerText;
+  navigator.clipboard.writeText(summaryText).then(() => {
+    // Pokaż krótkie powiadomienie
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-success alert-dismissible fade show position-fixed';
+    alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    alertDiv.innerHTML = `
+      <i class="bi bi-check-circle me-2"></i>Podsumowanie skopiowane do schowka!
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.body.appendChild(alertDiv);
+    
+    // Usuń po 3 sekundach
+    setTimeout(() => {
+      if (alertDiv.parentNode) {
+        alertDiv.remove();
+      }
+    }, 3000);
+  }).catch(() => {
+    alert('Nie udało się skopiować do schowka');
+  });
 }
 </script>
 {% endblock %}

@@ -89,11 +89,16 @@
                 <i class="bi bi-download"></i> Pobierz
               </a>
 
-              {% if doc.mime_type == 'application/pdf' and doc.ocr_status == 'done' %}
+              {% if doc.mime_type == 'application/pdf' %}
               <a href="{{ url_for('document_pdf_viewer', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary">
                 <i class="bi bi-search"></i> Zaawansowany podgląd
               </a>
+              {% elif doc.mime_type and doc.mime_type.startswith('image/') %}
+              <a href="{{ url_for('document_image_viewer', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-search"></i> Zaawansowany podgląd
+              </a>
               {% endif %}
+
             </div>
             
             <div class="btn-group">
@@ -314,23 +319,50 @@
           </div>
         </div>
         
-        <!-- Wyniki OCR (jeśli dostępne) -->
+        <!-- Wyniki OCR (jeśli dostępne) - ZAKTUALIZOWANA SEKCJA -->
         {% if ocr_txt and ocr_text_preview and not (doc.mime_type and doc.mime_type == 'text/plain') and not doc.original_filename.lower().endswith('.txt') %}
           <div class="card bg-light">
             <div class="card-header d-flex justify-content-between align-items-center">
               <h6 class="mb-0">Rozpoznany tekst</h6>
-              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('document_download', doc_id=ocr_txt.id) }}">
-                <i class="bi bi-download"></i> Pobierz tekst
-              </a>
+              <div class="btn-group">
+                <!-- NOWY: Przycisk odświeżania tekstu OCR -->
+                <button type="button" class="btn btn-sm btn-outline-info" onclick="refreshOcrText({{ ocr_txt.id }})">
+                  <i class="bi bi-arrow-clockwise"></i> Odśwież
+                </button>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('document_download', doc_id=ocr_txt.id) }}">
+                  <i class="bi bi-download"></i> Pobierz tekst
+                </a>
+              </div>
             </div>
             <div class="card-body">
-              <pre class="text-preview bg-white p-3 border rounded" style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.9rem;">{{ ocr_text_preview }}</pre>
+              <div id="ocrTextContent">
+                <pre class="text-preview bg-white p-3 border rounded" style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.9rem;">{{ ocr_text_preview }}</pre>
+              </div>
+              
+              <!-- NOWY: Loader dla odświeżania -->
+              <div id="ocrRefreshLoader" class="d-none">
+                <div class="d-flex justify-content-center align-items-center py-4">
+                  <div class="spinner-border text-primary me-3" role="status">
+                    <span class="visually-hidden">Odświeżanie...</span>
+                  </div>
+                  <span>Pobieranie aktualnego tekstu OCR...</span>
+                </div>
+              </div>
+              
               {% if ocr_text_preview|length > 1000 %}
                 <div class="text-center mt-3">
                   <a href="{{ url_for('document_text_preview', doc_id=ocr_txt.id) }}" class="btn btn-outline-primary">
                     <i class="bi bi-eye"></i> Pokaż pełny tekst OCR
                   </a>
                 </div>
+              {% endif %}
+              
+              <!-- NOWY: Informacja o ostatniej aktualizacji -->
+              {% if ocr_txt.last_modified %}
+              <div class="text-muted small mt-2">
+                <i class="bi bi-clock me-1"></i>
+                Ostatnia aktualizacja: {{ ocr_txt.last_modified.strftime('%Y-%m-%d %H:%M') }}
+              </div>
               {% endif %}
             </div>
           </div>
@@ -422,5 +454,97 @@
     updateProgress();
   })();
   {% endif %}
+
+// NOWE FUNKCJE: Odświeżanie tekstu OCR i automatyczna aktualizacja
+
+// Funkcja odświeżania tekstu OCR
+async function refreshOcrText(ocrDocId) {
+  const loader = document.getElementById('ocrRefreshLoader');
+  const content = document.getElementById('ocrTextContent');
+  
+  // Pokaż loader
+  loader.classList.remove('d-none');
+  content.style.opacity = '0.5';
+  
+  try {
+    // Pobierz aktualny tekst OCR
+    const response = await fetch(`/api/document/{{ doc.id }}/ocr-text`);
+    const result = await response.json();
+    
+    if (result.success) {
+      if (result.has_ocr && result.text.trim()) {
+        // Aktualizuj wyświetlany tekst
+        const preElement = content.querySelector('pre');
+        if (preElement) {
+          preElement.textContent = result.text;
+        }
+        
+        // Pokaż komunikat o powodzeniu
+        showAlert('Tekst OCR został odświeżony', 'success');
+      } else {
+        showAlert('Brak tekstu OCR dla tego dokumentu', 'warning');
+      }
+    } else {
+      showAlert('Nie udało się pobrać tekstu OCR', 'danger');
+    }
+    
+  } catch (error) {
+    console.error('Błąd odświeżania OCR:', error);
+    showAlert('Błąd podczas odświeżania tekstu OCR: ' + error.message, 'danger');
+  } finally {
+    // Ukryj loader
+    loader.classList.add('d-none');
+    content.style.opacity = '1';
+  }
+}
+
+// Funkcja pomocnicza do wyświetlania alertów
+function showAlert(message, type = 'info') {
+  const alertClass = `alert-${type}`;
+  const iconMap = {
+    'success': 'bi-check-circle',
+    'warning': 'bi-exclamation-triangle',
+    'danger': 'bi-exclamation-triangle',
+    'info': 'bi-info-circle'
+  };
+  const icon = iconMap[type] || 'bi-info-circle';
+  
+  const alert = document.createElement('div');
+  alert.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
+  alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+  alert.innerHTML = `
+    <i class="${icon} me-2"></i>${message}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  `;
+  document.body.appendChild(alert);
+  
+  // Usuń po 5 sekundach
+  setTimeout(() => {
+    if (alert.parentNode) {
+      alert.remove();
+    }
+  }, 5000);
+}
+
+// Automatyczne odświeżanie tekstu przy powrocie z zaawansowanego widoku
+// Sprawdź czy są parametry URL wskazujące na aktualizację tekstu
+document.addEventListener('DOMContentLoaded', function() {
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('ocr_updated') === 'true') {
+    // Automatycznie odśwież tekst OCR
+    const ocrDocId = urlParams.get('ocr_doc_id');
+    if (ocrDocId) {
+      setTimeout(() => {
+        refreshOcrText(parseInt(ocrDocId));
+      }, 1000); // Opóźnienie 1s żeby strona się załadowała
+    }
+    
+    // Usuń parametry z URL żeby nie odświeżać przy każdym odświeżeniu strony
+    const newUrl = new URL(window.location);
+    newUrl.searchParams.delete('ocr_updated');
+    newUrl.searchParams.delete('ocr_doc_id');
+    window.history.replaceState({}, '', newUrl);
+  }
+});
 </script>
 {% endblock %}

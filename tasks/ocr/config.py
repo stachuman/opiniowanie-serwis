@@ -8,7 +8,8 @@ from pathlib import Path
 # Stałe dla modelu OCR
 DEFAULT_OCR_INSTRUCTION = "Read all text in the image. Extract all visible text including headers, footers, paragraphs, lists, and tables. Preserve original formatting as much as possible. Output to be a plain text. Ignore watermarks. Text is in Polish."
 OCR_MODEL_PATH = "Qwen/Qwen2.5-VL-7B-Instruct"
-MAX_NEW_TOKENS = 6096
+#OCR_MODEL_PATH = "Qwen/Qwen2.5-VL-72B-Instruct"
+MAX_NEW_TOKENS = 8000
 
 # Konfiguracja logowania
 LOG_DIR = os.getenv("OCR_LOG_DIR", "/var/log")
@@ -52,6 +53,6 @@ DPI = 300  # Rozdzielczość przy konwersji PDF -> obraz
 DEVICE_STRATEGY = os.getenv("OCR_DEVICE_STRATEGY", "single").lower()
 
 # Ile pamięci zostawiamy na GPU (GiB) – aby uniknąć OOM przy single
-GPU_MEM_LIMIT_GB = int(os.getenv("OCR_GPU_MEM_LIMIT_GB", "22"))
+GPU_MEM_LIMIT_GB = int(os.getenv("OCR_GPU_MEM_LIMIT_GB", "23"))
 
 GPU_SELECT_MODE  = os.getenv("OCR_GPU_SELECT", "auto").lower()

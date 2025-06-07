@@ -22,6 +22,9 @@ engine = create_engine(
     echo=False  # Zmień na True, aby włączyć logowanie SQL
 )
 
+# W db.py, w funkcji init_db(), dodaj kod migracji dla pola note
+# Znajdź istniejący fragment z migracją i aktualizuj go:
+
 def init_db():
     """Inicjalizacja bazy danych i aktualizacja schematu."""
     logger.info("Inicjalizacja bazy danych...")
@@ -37,9 +40,9 @@ def init_db():
         from sqlalchemy import inspect
         inspector = inspect(engine)
         
-        # Sprawdź, czy kolumny content_type, mime_type istnieją
+        # Sprawdź, czy kolumny content_type, mime_type, note istnieją
         existing_columns = {col['name'] for col in inspector.get_columns('document')}
-        needed_columns = {'content_type', 'mime_type', 'ocr_confidence'}
+        needed_columns = {'content_type', 'mime_type', 'ocr_confidence', 'note'}
         
         # Jeśli brakuje którejś kolumny, dodaj ją
         missing_columns = needed_columns - existing_columns
@@ -62,6 +65,10 @@ def init_db():
                 if 'ocr_confidence' in missing_columns:
                     logger.info("Dodawanie kolumny 'ocr_confidence'...")
                     connection.execute(text("ALTER TABLE document ADD COLUMN ocr_confidence FLOAT"))
+                    
+                if 'note' in missing_columns:
+                    logger.info("Dodawanie kolumny 'note'...")
+                    connection.execute(text("ALTER TABLE document ADD COLUMN note VARCHAR"))
                 
                 connection.commit()
             

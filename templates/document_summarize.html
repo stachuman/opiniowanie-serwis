@@ -1,0 +1,466 @@
+<!-- templates/document_summarize.html -->
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2>Generowanie podsumowania dokumentu</h2>
+  <div>
+    <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i> Powrót do dokumentu
+    </a>
+  </div>
+</div>
+
+<!-- Informacje o dokumencie -->
+<div class="card mb-4">
+  <div class="card-header bg-light">
+    <h5 class="card-title mb-0">
+      <i class="bi bi-file-earmark-text me-2"></i>Dokument: {{ doc.original_filename }}
+    </h5>
+  </div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-6">
+        <p class="mb-1"><strong>Sygnatura:</strong> {{ doc.sygnatura or "Brak" }}</p>
+        <p class="mb-1"><strong>Typ:</strong> {{ doc.doc_type or "Nie określono" }}</p>
+      </div>
+      <div class="col-md-6">
+        <p class="mb-1"><strong>Status:</strong> {{ doc.step }}</p>
+        <p class="mb-1"><strong>Dodano:</strong> {{ doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Formularz podsumowania -->
+<div class="card mb-4">
+  <div class="card-header bg-light d-flex justify-content-between align-items-center">
+    <h5 class="card-title mb-0">
+      <i class="bi bi-robot me-2"></i>Konfiguracja podsumowania
+    </h5>
+    <button type="button" class="btn btn-sm btn-outline-info" onclick="testLLMConnection()">
+      <i class="bi bi-wifi"></i> Test połączenia z LLM
+    </button>
+  </div>
+  <div class="card-body">
+    <form id="summarizeForm">
+      <div class="mb-3">
+        <label for="customInstruction" class="form-label">
+          Instrukcja dla LLM <small class="text-muted">(opcjonalna - pozostaw puste aby użyć domyślnej)</small>
+        </label>
+        <textarea class="form-control" id="customInstruction" name="custom_instruction" rows="8" 
+                  placeholder="Wprowadź własną instrukcję dla LLM lub pozostaw puste aby użyć domyślnej..."></textarea>
+        <div class="form-text">
+          <strong>Domyślna instrukcja:</strong> Przeanalizuje dokument i przygotuje zwięzłe podsumowanie z główną tematyką, kluczowymi informacjami i wnioskami.
+        </div>
+      </div>
+      
+      <div class="mb-3">
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-outline-secondary" onclick="loadDefaultInstruction()">
+            <i class="bi bi-arrow-clockwise"></i> Użyj domyślnej instrukcji
+          </button>
+          <button type="button" class="btn btn-outline-info" onclick="showInstructionExamples()">
+            <i class="bi bi-lightbulb"></i> Przykłady instrukcji
+          </button>
+        </div>
+      </div>
+      
+      <!-- NOWA SEKCJA: Opcje zapisu do notatki -->
+      <div class="card bg-light mb-3">
+        <div class="card-body">
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="saveToNote" name="save_to_note" checked>
+            <label class="form-check-label" for="saveToNote">
+              <strong>Zapisz podsumowanie do notatki dokumentu</strong>
+            </label>
+          </div>
+          
+          <div id="noteOptions" class="ms-4">
+            <div class="mb-2">
+              <strong>Tryb zapisu:</strong>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="note_mode" id="noteAppend" value="append" checked>
+              <label class="form-check-label" for="noteAppend">
+                <strong>Dodaj do istniejącej notatki</strong> (na końcu)
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="note_mode" id="notePrepend" value="prepend">
+              <label class="form-check-label" for="notePrepend">
+                <strong>Dodaj na początku</strong> istniejącej notatki
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="note_mode" id="noteReplace" value="replace">
+              <label class="form-check-label" for="noteReplace">
+                <strong>Zastąp całą notatkę</strong> podsumowaniem
+              </label>
+            </div>
+            
+            {% if current_note %}
+            <div class="alert alert-info mt-2">
+              <i class="bi bi-info-circle me-1"></i>
+              <strong>Aktualna notatka:</strong> <small>{{ current_note[:100] }}{% if current_note|length > 100 %}...{% endif %}</small>
+            </div>
+            {% else %}
+            <div class="alert alert-secondary mt-2">
+              <i class="bi bi-sticky me-1"></i> Dokument nie ma jeszcze notatki
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      
+      <div class="d-flex justify-content-end">
+        <button type="submit" class="btn btn-primary" id="generateBtn">
+          <i class="bi bi-magic"></i> Generuj podsumowanie
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Obszar wyników -->
+<div id="resultsArea" style="display: none;">
+  <div class="card">
+    <div class="card-header bg-success text-white">
+      <h5 class="card-title mb-0">
+        <i class="bi bi-check-circle me-2"></i>Podsumowanie dokumentu
+      </h5>
+    </div>
+    <div class="card-body">
+      <div id="summaryContent" class="mb-3"></div>
+      <div class="d-flex justify-content-end gap-2">
+        <button type="button" class="btn btn-outline-secondary" onclick="copySummaryToClipboard()">
+          <i class="bi bi-clipboard"></i> Kopiuj do schowka
+        </button>
+        <button type="button" class="btn btn-outline-primary" onclick="generateAnother()">
+          <i class="bi bi-arrow-repeat"></i> Generuj ponownie
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Obszar ładowania -->
+<div id="loadingArea" style="display: none;">
+  <div class="card">
+    <div class="card-body text-center py-5">
+      <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
+        <span class="visually-hidden">Ładowanie...</span>
+      </div>
+      <h5>Generowanie podsumowania...</h5>
+      <p class="text-muted">LLM analizuje dokument. To może potrwać od kilku sekund do 2 minut.</p>
+      <div class="progress mt-3" style="height: 20px;">
+        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+             role="progressbar" style="width: 100%"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Obszar błędów -->
+<div id="errorArea" style="display: none;">
+  <div class="card">
+    <div class="card-header bg-danger text-white">
+      <h5 class="card-title mb-0">
+        <i class="bi bi-exclamation-triangle me-2"></i>Błąd generowania podsumowania
+      </h5>
+    </div>
+    <div class="card-body">
+      <div id="errorContent" class="mb-3"></div>
+      <button type="button" class="btn btn-outline-danger" onclick="retryGeneration()">
+        <i class="bi bi-arrow-repeat"></i> Spróbuj ponownie
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal z przykładami instrukcji -->
+<div class="modal fade" id="examplesModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-lightbulb me-2"></i>Przykłady instrukcji dla LLM
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="accordion" id="examplesAccordion">
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#example1">
+                Podsumowanie medyczne
+              </button>
+            </h2>
+            <div id="example1" class="accordion-collapse collapse show">
+              <div class="accordion-body">
+                <pre class="bg-light p-3 rounded"><code>Przeanalizuj ten dokument medyczny i przygotuj strukturalne podsumowanie:
+
+1. **Dane pacjenta** - podstawowe informacje
+2. **Rozpoznanie** - główna diagnoza i kody ICD
+3. **Objawy i dolegliwości** - zgłaszane problemy
+4. **Badania** - wykonane badania i ich wyniki
+5. **Leczenie** - zalecenia i przepisane leki
+6. **Rokowania** - przewidywany przebieg leczenia
+
+Zachowaj medyczną terminologię i podaj konkretne daty.</code></pre>
+                <button class="btn btn-sm btn-outline-primary" onclick="useExample(1)">Użyj tej instrukcji</button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#example2">
+                Analiza prawna
+              </button>
+            </h2>
+            <div id="example2" class="accordion-collapse collapse">
+              <div class="accordion-body">
+                <pre class="bg-light p-3 rounded"><code>Przeprowadź analizę prawną tego dokumentu:
+
+1. **Charakter dokumentu** - rodzaj pisma prawnego
+2. **Strony postępowania** - podmioty uczestniczące
+3. **Przedmiot sprawy** - czego dotyczy sprawa
+4. **Podstawy prawne** - przywołane przepisy i artykuły
+5. **Kluczowe ustalenia** - istotne fakty i dowody
+6. **Wnioski** - podsumowanie stanowiska lub decyzji
+
+Skup się na aspektach merytorycznych i prawnych.</code></pre>
+                <button class="btn btn-sm btn-outline-primary" onclick="useExample(2)">Użyj tej instrukcji</button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="accordion-item">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#example3">
+                Streszczenie ogólne
+              </button>
+            </h2>
+            <div id="example3" class="accordion-collapse collapse">
+              <div class="accordion-body">
+                <pre class="bg-light p-3 rounded"><code>Przygotuj zwięzłe streszczenie tego dokumentu w formie punktów:
+
+• **Główna tematyka** - w 1-2 zdaniach
+• **Kluczowe informacje** - najważniejsze fakty
+• **Daty i osoby** - istotne terminy i podmioty
+• **Działania i decyzje** - co zostało ustalone
+• **Następne kroki** - jeśli są wskazane
+
+Maksymalnie 200 słów, język jasny i zrozumiały.</code></pre>
+                <button class="btn btn-sm btn-outline-primary" onclick="useExample(3)">Użyj tej instrukcji</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Domyślna instrukcja
+const defaultInstruction = `{{ default_instruction|safe }}`;
+
+// Przykłady instrukcji
+const examples = {
+  1: `Przeanalizuj ten dokument medyczny i przygotuj strukturalne podsumowanie:
+
+1. **Dane pacjenta** - podstawowe informacje
+2. **Rozpoznanie** - główna diagnoza i kody ICD
+3. **Objawy i dolegliwości** - zgłaszane problemy
+4. **Badania** - wykonane badania i ich wyniki
+5. **Leczenie** - zalecenia i przepisane leki
+6. **Rokowania** - przewidywany przebieg leczenia
+
+Zachowaj medyczną terminologię i podaj konkretne daty.`,
+  
+  2: `Przeprowadź analizę prawną tego dokumentu:
+
+1. **Charakter dokumentu** - rodzaj pisma prawnego
+2. **Strony postępowania** - podmioty uczestniczące
+3. **Przedmiot sprawy** - czego dotyczy sprawa
+4. **Podstawy prawne** - przywołane przepisy i artykuły
+5. **Kluczowe ustalenia** - istotne fakty i dowody
+6. **Wnioski** - podsumowanie stanowiska lub decyzji
+
+Skup się na aspektach merytorycznych i prawnych.`,
+  
+  3: `Przygotuj zwięzłe streszczenie tego dokumentu w formie punktów:
+
+• **Główna tematyka** - w 1-2 zdaniach
+• **Kluczowe informacje** - najważniejsze fakty
+• **Daty i osoby** - istotne terminy i podmioty
+• **Działania i decyzje** - co zostało ustalone
+• **Następne kroki** - jeśli są wskazane
+
+Maksymalnie 200 słów, język jasny i zrozumiały.`
+};
+
+// Obsługa formularza
+document.getElementById('summarizeForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  
+  const customInstruction = document.getElementById('customInstruction').value;
+  const saveToNote = document.getElementById('saveToNote').checked;
+  const noteMode = document.querySelector('input[name="note_mode"]:checked').value;
+  const generateBtn = document.getElementById('generateBtn');
+  
+  // Pokaż loading, ukryj inne sekcje
+  showLoadingArea();
+  
+  // Wyłącz przycisk
+  generateBtn.disabled = true;
+  generateBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Generowanie...';
+  
+  try {
+    const formData = new FormData();
+    if (customInstruction.trim()) {
+      formData.append('custom_instruction', customInstruction);
+    }
+    formData.append('save_to_note', saveToNote);
+    formData.append('note_mode', noteMode);
+    
+    const response = await fetch(`/document/{{ doc.id }}/summarize`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      showResults(result.summary, result.saved_to_note);
+    } else {
+      showError(result.error);
+    }
+    
+  } catch (error) {
+    showError(`Błąd komunikacji: ${error.message}`);
+  } finally {
+    // Przywróć przycisk
+    generateBtn.disabled = false;
+    generateBtn.innerHTML = '<i class="bi bi-magic"></i> Generuj podsumowanie';
+  }
+});
+
+// Obsługa checkbox "Zapisz do notatki"
+document.getElementById('saveToNote').addEventListener('change', function() {
+  const noteOptions = document.getElementById('noteOptions');
+  if (this.checked) {
+    noteOptions.style.display = 'block';
+  } else {
+    noteOptions.style.display = 'none';
+  }
+});
+
+function showLoadingArea() {
+  document.getElementById('loadingArea').style.display = 'block';
+  document.getElementById('resultsArea').style.display = 'none';
+  document.getElementById('errorArea').style.display = 'none';
+}
+
+function showResults(summary, savedToNote) {
+  document.getElementById('resultsArea').style.display = 'block';
+  document.getElementById('loadingArea').style.display = 'none';
+  document.getElementById('errorArea').style.display = 'none';
+  
+  // Formatuj podsumowanie (zamień nowe linie na <br>)
+  const formattedSummary = summary.replace(/\n/g, '<br>');
+  
+  let resultHtml = `<div class="summary-text">${formattedSummary}</div>`;
+  
+  // Jeśli zapisano do notatki, pokaż informację
+  if (savedToNote) {
+    resultHtml += `
+      <div class="alert alert-success mt-3">
+        <i class="bi bi-check-circle me-2"></i>
+        <strong>Podsumowanie zostało zapisane do notatki dokumentu!</strong>
+        <div class="mt-2">
+          <a href="/document/{{ doc.id }}" class="btn btn-sm btn-outline-success me-2">
+            <i class="bi bi-eye"></i> Zobacz dokument
+          </a>
+          {% if doc.parent_id %}
+          <a href="/opinion/{{ doc.parent_id }}" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-arrow-left"></i> Powrót do opinii
+          </a>
+          {% endif %}
+        </div>
+      </div>
+    `;
+  }
+  
+  document.getElementById('summaryContent').innerHTML = resultHtml;
+}
+
+function showError(errorMessage) {
+  document.getElementById('errorArea').style.display = 'block';
+  document.getElementById('loadingArea').style.display = 'none';
+  document.getElementById('resultsArea').style.display = 'none';
+  
+  document.getElementById('errorContent').innerHTML = `<div class="alert alert-danger">${errorMessage}</div>`;
+}
+
+function loadDefaultInstruction() {
+  document.getElementById('customInstruction').value = defaultInstruction;
+}
+
+function showInstructionExamples() {
+  new bootstrap.Modal(document.getElementById('examplesModal')).show();
+}
+
+function useExample(exampleNumber) {
+  document.getElementById('customInstruction').value = examples[exampleNumber];
+  bootstrap.Modal.getInstance(document.getElementById('examplesModal')).hide();
+}
+
+function copySummaryToClipboard() {
+  const summaryText = document.getElementById('summaryContent').innerText;
+  navigator.clipboard.writeText(summaryText).then(() => {
+    // Pokaż toast lub alert
+    alert('Podsumowanie zostało skopiowane do schowka!');
+  });
+}
+
+function generateAnother() {
+  document.getElementById('resultsArea').style.display = 'none';
+  document.getElementById('errorArea').style.display = 'none';
+}
+
+function retryGeneration() {
+  document.getElementById('errorArea').style.display = 'none';
+  document.getElementById('summarizeForm').dispatchEvent(new Event('submit'));
+}
+
+async function testLLMConnection() {
+  try {
+    const response = await fetch('/api/llm/test-connection');
+    const result = await response.json();
+    
+    if (result.success) {
+      alert('✅ Połączenie z LLM działa poprawnie!');
+    } else {
+      alert(`❌ Błąd połączenia z LLM: ${result.error}`);
+    }
+  } catch (error) {
+    alert(`❌ Błąd testowania połączenia: ${error.message}`);
+  }
+}
+</script>
+
+<style>
+.summary-text {
+  font-size: 1.1em;
+  line-height: 1.6;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 0.5rem;
+  border-left: 4px solid #28a745;
+}
+</style>
+
+{% endblock %}
