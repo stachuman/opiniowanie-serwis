@@ -2,6 +2,7 @@
 venv/
 env/
 .env/
+._*
 
 # Pliki pycache
 __pycache__/

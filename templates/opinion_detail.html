@@ -35,11 +35,29 @@
                  value="{{ opinion.note or '' }}" placeholder="Dodatkowe informacje">
         </div>
       </div>
-      <div class="d-flex justify-content-end">
+      <div class="btn-group">
         <button type="submit" class="btn btn-primary">
           <i class="bi bi-check-lg me-1"></i>Zapisz zmiany
         </button>
       </div>
+      <div class="btn-group">
+        {% if opinion.stored_filename.endswith('.empty') %}
+        <a href="{{ url_for('document_update_form', doc_id=opinion.id) }}" class="btn btn-outline-primary">
+          <i class="bi bi-upload"></i> Wgraj dokument Word
+        </a>
+        {% else %}
+        <a href="{{ url_for('document_update_form', doc_id=opinion.id) }}" class="btn btn-outline-warning">
+          <i class="bi bi-pencil"></i> Aktualizuj dokument
+        </a>
+        {% endif %}
+      </div>
+
+      <div class="btn-group">
+        <a href="{{ url_for('document_download', doc_id=opinion.id) }}" class="btn btn-outline-secondary">
+          <i class="bi bi-download"></i> Pobierz dokument
+        </a>
+      </div>
+
     </form>
   </div>
 </div>

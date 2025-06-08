@@ -93,7 +93,7 @@ def list_opinions(request: Request,
 
                 # Wyszukiwanie w treści
                 if search_content:
-                    content_text = get_document_text_content(opinion.id)
+                    content_text = get_document_text_content(opinion)
                     if content_text:
                         if search_term.lower() in content_text.lower():
                             matches.append('content')

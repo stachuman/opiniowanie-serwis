@@ -7,13 +7,14 @@
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h2>Podgląd PDF z zaznaczaniem</h2>
         <div>
+          <!--
           {% if doc.parent_id %}
-          <!-- Gdy dokument ma rodzica (jest częścią opinii), wróć do widoku opinii -->
+          -- Gdy dokument ma rodzica (jest częścią opinii), wróć do widoku opinii
           <a href="{{ url_for('opinion_detail', doc_id=doc.parent_id) }}" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left"></i> Powrót do opinii
           </a>
           {% else %}
-          <!-- Gdy dokument nie ma rodzica (jest samodzielny), wróć do widoku dokumentu -->
+          -- Gdy dokument nie ma rodzica (jest samodzielny), wróć do widoku dokumentu 
           <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left"></i> Powrót do dokumentu
           </a>
@@ -22,6 +23,7 @@
           <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-outline-primary">
             <i class="bi bi-download"></i> Pobierz PDF
           </a>
+          -->
 
           <!-- Przycisk uruchamiania OCR -->
           {% if doc.ocr_status != 'running' %}
