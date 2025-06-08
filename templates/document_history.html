@@ -1,3 +1,4 @@
+<!-- templates/document_history.html - POPRAWIONA WERSJA -->
 {% extends 'base.html' %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -11,66 +12,203 @@
 
 <div class="card mb-4">
   <div class="card-header">
-    <h5 class="card-title mb-0">Aktualna wersja: {{ doc.original_filename }}</h5>
+    <h5 class="card-title mb-0">
+      <i class="bi bi-file-earmark-check text-success me-2"></i>
+      Aktualna wersja: {{ doc.original_filename }}
+    </h5>
   </div>
   <div class="card-body">
-    <p><strong>Ostatnia modyfikacja:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') if doc.last_modified else doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</p>
-    {% if doc.comments %}
+    <div class="row">
+      <div class="col-md-6">
+        <p><strong>Ostatnia modyfikacja:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') if doc.last_modified else doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</p>
+        <p><strong>Data dodania:</strong> {{ doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</p>
+      </div>
+      <div class="col-md-6">
+        <p><strong>Rozmiar pliku:</strong>
+          {% if doc.stored_filename %}
+            <span class="text-muted">{{ doc.stored_filename }}</span>
+          {% else %}
+            <span class="text-muted">Nieznany</span>
+          {% endif %}
+        </p>
+        <p><strong>Typ MIME:</strong>
+          <span class="badge bg-info">{{ doc.mime_type or "Nieznany" }}</span>
+        </p>
+      </div>
+    </div>
+
+    {% if doc.note %}
     <div class="mt-3">
-      <h6>Komentarze:</h6>
+      <h6>Notatki i historia zmian:</h6>
       <div class="card bg-light">
         <div class="card-body">
-          <pre class="mb-0" style="white-space: pre-wrap;">{{ doc.comments }}</pre>
+          <pre class="mb-0" style="white-space: pre-wrap; font-family: inherit;">{{ doc.note }}</pre>
         </div>
       </div>
     </div>
     {% endif %}
+
     <div class="mt-3">
       <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-outline-primary">
         <i class="bi bi-download"></i> Pobierz aktualną wersję
       </a>
+      {% if doc.mime_type and 'word' in doc.mime_type %}
+      <a href="{{ url_for('document_update_form', doc_id=doc.id) }}" class="btn btn-outline-warning ms-2">
+        <i class="bi bi-pencil"></i> Aktualizuj dokument
+      </a>
+      {% endif %}
     </div>
   </div>
 </div>
 
 {% if history_docs %}
-<h3 class="mb-3">Poprzednie wersje</h3>
-<div class="table-responsive">
-  <table class="table table-hover">
-    <thead class="table-light">
-      <tr>
-        <th>Wersja</th>
-        <th>Data utworzenia</th>
-        <th>Komentarze</th>
-        <th class="text-end">Akcje</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for history_doc in history_docs %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td>{{ history_doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</td>
-        <td>
-          {% if history_doc.comments %}
-          <span class="text-truncate d-inline-block" style="max-width: 400px;">{{ history_doc.comments }}</span>
-          {% else %}
-          <span class="text-muted">Brak komentarzy</span>
-          {% endif %}
-        </td>
-        <td class="text-end">
-          <a href="{{ url_for('document_download', doc_id=history_doc.id) }}" 
-             class="btn btn-sm btn-outline-secondary">
-            <i class="bi bi-download"></i> Pobierz
-          </a>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="card">
+  <div class="card-header">
+    <h5 class="card-title mb-0">
+      <i class="bi bi-clock-history me-2"></i>
+      Poprzednie wersje ({{ history_docs|length }})
+    </h5>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Nr wersji</th>
+            <th>Nazwa pliku</th>
+            <th>Data utworzenia wersji</th>
+            <th>Komentarze</th>
+            <th class="text-end">Akcje</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for history_doc in history_docs %}
+          <tr>
+            <td>
+              <span class="badge bg-secondary">
+                Wersja {{ loop.index }}
+              </span>
+            </td>
+            <td>
+              <div>
+                <strong>{{ history_doc.original_filename }}</strong>
+                {% if history_doc.stored_filename %}
+                <br><small class="text-muted">{{ history_doc.stored_filename }}</small>
+                {% endif %}
+              </div>
+            </td>
+            <td>
+              <div>
+                {{ history_doc.upload_time.strftime('%Y-%m-%d %H:%M') }}
+                {% if history_doc.upload_time != history_doc.last_modified and history_doc.last_modified %}
+                <br><small class="text-muted">Zmod. {{ history_doc.last_modified.strftime('%Y-%m-%d %H:%M') }}</small>
+                {% endif %}
+              </div>
+            </td>
+            <td>
+              {% if history_doc.comments %}
+              <div class="text-truncate" style="max-width: 300px;" title="{{ history_doc.comments }}">
+                {{ history_doc.comments }}
+              </div>
+              {% else %}
+              <span class="text-muted">Brak komentarzy</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              <div class="btn-group">
+                <a href="{{ url_for('document_download', doc_id=history_doc.id) }}"
+                   class="btn btn-sm btn-outline-secondary"
+                   title="Pobierz wersję {{ loop.index }}">
+                  <i class="bi bi-download"></i> Pobierz
+                </a>
+                <button type="button"
+                        class="btn btn-sm btn-outline-info"
+                        data-bs-toggle="modal"
+                        data-bs-target="#compareModal{{ loop.index }}"
+                        title="Porównaj z aktualną wersją">
+                  <i class="bi bi-arrows-angle-expand"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
+
+<!-- Modals dla porównania wersji -->
+{% for history_doc in history_docs %}
+<div class="modal fade" id="compareModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-arrows-angle-expand me-2"></i>
+          Informacje o wersji {{ loop.index }}
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row">
+          <div class="col-md-6">
+            <h6>Wersja historyczna {{ loop.index }}</h6>
+            <ul class="list-unstyled">
+              <li><strong>Nazwa:</strong> {{ history_doc.original_filename }}</li>
+              <li><strong>Data:</strong> {{ history_doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</li>
+              <li><strong>Typ:</strong> {{ history_doc.mime_type or "Nieznany" }}</li>
+            </ul>
+          </div>
+          <div class="col-md-6">
+            <h6>Aktualna wersja</h6>
+            <ul class="list-unstyled">
+              <li><strong>Nazwa:</strong> {{ doc.original_filename }}</li>
+              <li><strong>Data:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') if doc.last_modified else doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</li>
+              <li><strong>Typ:</strong> {{ doc.mime_type or "Nieznany" }}</li>
+            </ul>
+          </div>
+        </div>
+
+        {% if history_doc.comments %}
+        <div class="mt-3">
+          <h6>Komentarze do wersji {{ loop.index }}:</h6>
+          <div class="card bg-light">
+            <div class="card-body">
+              <pre class="mb-0" style="white-space: pre-wrap; font-family: inherit;">{{ history_doc.comments }}</pre>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      <div class="modal-footer">
+        <a href="{{ url_for('document_download', doc_id=history_doc.id) }}" class="btn btn-primary">
+          <i class="bi bi-download"></i> Pobierz wersję {{ loop.index }}
+        </a>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Zamknij</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
 {% else %}
-<div class="alert alert-info">
-  <i class="bi bi-info-circle-fill me-2"></i> Ten dokument nie ma zapisanej historii wersji.
+<div class="card">
+  <div class="card-body">
+    <div class="alert alert-info">
+      <i class="bi bi-info-circle-fill me-2"></i>
+      Ten dokument nie ma zapisanej historii wersji.
+      <hr>
+      <div class="mb-0">
+        <strong>Jak działa historia wersji?</strong>
+        <ul class="mt-2 mb-0">
+          <li>Historia jest tworzona automatycznie przy aktualizacji dokumentów Word</li>
+          <li>Poprzednie wersje są zachowywane z możliwością pobrania</li>
+          <li>Każda aktualizacja może zawierać komentarz opisujący zmiany</li>
+        </ul>
+      </div>
+    </div>
+  </div>
 </div>
 {% endif %}
 {% endblock %}

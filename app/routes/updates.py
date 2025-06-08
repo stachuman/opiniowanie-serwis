@@ -20,6 +20,7 @@ from app.document_utils import detect_mime_type
 router = APIRouter()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+
 @router.get("/document/{doc_id}/update")
 def document_update_form(request: Request, doc_id: int):
     """Formularz aktualizacji istniejącego dokumentu lub wgrania dokumentu Word dla pustej opinii."""
@@ -76,6 +77,9 @@ def document_update_form(request: Request, doc_id: int):
 
     return templates.TemplateResponse("document_update.html", context)
 
+
+# W pliku app/routes/updates.py - poprawiona funkcja document_update
+
 @router.post("/document/{doc_id}/update")
 async def document_update(request: Request, doc_id: int, updated_file: UploadFile = File(...),
                           keep_history: bool = Form(True), comments: str | None = Form(None)):
@@ -108,17 +112,34 @@ async def document_update(request: Request, doc_id: int, updated_file: UploadFil
                 detail=f"Obsługiwane są tylko pliki Word (.doc, .docx). Przesłano: {suffix}"
             )
 
-        # Zachowaj stary plik jeśli trzeba
-        old_file_path = None
+        # POPRAWKA: Zachowaj stary plik i utwórz rekord historyczny jeśli trzeba
         if keep_history and not is_empty_opinion:
             old_file_path = FILES_DIR / doc.stored_filename
             if old_file_path.exists():
-                # Utwórz kopię historyczną
+                # Utwórz kopię historyczną pliku
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 history_name = f"{doc.id}_backup_{timestamp}{Path(doc.stored_filename).suffix}"
                 history_path = FILES_DIR / "history" / history_name
                 history_path.parent.mkdir(exist_ok=True)
                 shutil.copy2(old_file_path, history_path)
+
+                # NOWE: Utwórz rekord w bazie danych dla wersji historycznej
+                historical_doc = Document(
+                    sygnatura=doc.sygnatura,
+                    doc_type="Archiwalna wersja",
+                    original_filename=f"{doc.original_filename} (wersja z {timestamp})",
+                    stored_filename=f"history/{history_name}",  # Ścieżka względna
+                    step=doc.step,
+                    ocr_status="none",  # Historia nie wymaga OCR
+                    parent_id=doc_id,  # KLUCZOWE: Powiązanie z głównym dokumentem
+                    is_main=False,
+                    content_type=doc.content_type,
+                    mime_type=doc.mime_type,
+                    upload_time=doc.last_modified or doc.upload_time,  # Data oryginalnej wersji
+                    creator=doc.creator,
+                    comments=f"Automatyczna kopia historyczna przed aktualizacją. {comments or ''}"
+                )
+                session.add(historical_doc)
 
         # Generuj nową nazwę pliku
         unique_name = f"{uuid.uuid4().hex}{suffix}"
@@ -132,11 +153,13 @@ async def document_update(request: Request, doc_id: int, updated_file: UploadFil
         actual_mime_type = detect_mime_type(dest)
 
         # Usuń stary plik (jeśli nie jest kopią historyczną)
-        if not is_empty_opinion and old_file_path and old_file_path.exists():
-            try:
-                old_file_path.unlink()
-            except Exception as e:
-                print(f"Błąd podczas usuwania starego pliku: {e}")
+        if not is_empty_opinion:
+            old_file_path = FILES_DIR / doc.stored_filename
+            if old_file_path.exists():
+                try:
+                    old_file_path.unlink()
+                except Exception as e:
+                    print(f"Błąd podczas usuwania starego pliku: {e}")
 
         # Aktualizuj rekord w bazie
         doc.original_filename = updated_file.filename
@@ -151,7 +174,10 @@ async def document_update(request: Request, doc_id: int, updated_file: UploadFil
 
         # Dodaj komentarz do historii jeśli podano
         if comments:
-            doc.note = (doc.note or "") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] Aktualizacja: {comments}"
+            existing_note = doc.note or ""
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+            new_comment = f"\n[{timestamp_str}] Aktualizacja: {comments}"
+            doc.note = existing_note + new_comment
 
         session.add(doc)
         session.commit()
@@ -162,7 +188,6 @@ async def document_update(request: Request, doc_id: int, updated_file: UploadFil
         else:
             return RedirectResponse(request.url_for("document_detail", doc_id=doc_id), status_code=303)
 
-
 @router.get("/document/{doc_id}/history")
 def document_history(request: Request, doc_id: int):
     """Historia wersji dokumentu."""
@@ -171,12 +196,12 @@ def document_history(request: Request, doc_id: int):
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
-        
+
         # Pobierz opinię nadrzędną jeśli istnieje
         parent_opinion = None
         if doc.parent_id:
             parent_opinion = session.get(Document, doc.parent_id)
-        
+
         # Pobierz historyczne wersje (dokumenty z parent_id równym ID aktualnego dokumentu)
         history_docs = session.exec(
             select(Document)
@@ -186,7 +211,7 @@ def document_history(request: Request, doc_id: int):
 
         # NOWE: Zbuduj nawigację
         breadcrumbs = BreadcrumbBuilder(request)
-        
+
         if doc.is_main:
             # To jest opinia
             breadcrumbs.add_home().add_opinion(doc)
@@ -196,22 +221,22 @@ def document_history(request: Request, doc_id: int):
                 breadcrumbs.add_home().add_opinion(parent_opinion).add_document(doc)
             else:
                 breadcrumbs.add_documents().add_document(doc)
-                
+
         breadcrumbs.add_current("Historia wersji", "clock-history")
-        
+
         navigation = {
             'breadcrumbs': breadcrumbs.build(),
             'page_title': f"Historia dokumentu: {doc.original_filename}",
             'page_actions': [],
             'context_info': []
         }
-    
+
     context = {
-        "request": request, 
-        "doc": doc, 
+        "request": request,
+        "doc": doc,
         "history_docs": history_docs,
         "current_year": datetime.now().year,  # Dodaj rok
         **navigation
     }
-    
+
     return templates.TemplateResponse("document_history.html", context)

@@ -1,0 +1,335 @@
+<!-- templates/image_preview.html -->
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h5 class="mb-0">
+      <i class="bi bi-image text-info me-2"></i>
+      Podgląd obrazu: {{ doc.original_filename }}
+    </h5>
+    <div class="btn-group">
+      <!-- Przyciski akcji -->
+      <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Szczegóły
+      </a>
+      <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-download"></i> Pobierz
+      </a>
+      <a href="{{ url_for('document_image_viewer', doc_id=doc.id) }}" class="btn btn-sm btn-outline-success">
+        <i class="bi bi-search"></i> Zaawansowany podgląd z OCR
+      </a>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <!-- Narzędzia podglądu -->
+    <div class="image-toolbar mb-3 p-2 bg-light rounded">
+      <div class="row align-items-center">
+        <div class="col-md-6">
+          <div class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-outline-secondary" onclick="zoomIn()">
+              <i class="bi bi-zoom-in"></i> Powiększ
+            </button>
+            <button type="button" class="btn btn-outline-secondary" onclick="zoomOut()">
+              <i class="bi bi-zoom-out"></i> Pomniejsz
+            </button>
+            <button type="button" class="btn btn-outline-secondary" onclick="resetZoom()">
+              <i class="bi bi-arrows-fullscreen"></i> Resetuj
+            </button>
+            <button type="button" class="btn btn-outline-secondary" onclick="fitToScreen()">
+              <i class="bi bi-aspect-ratio"></i> Dopasuj
+            </button>
+          </div>
+        </div>
+        <div class="col-md-6 text-md-end">
+          <span class="badge bg-info" id="zoomLevel">100%</span>
+          <span class="badge bg-secondary ms-2" id="imageSize">Ładowanie...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Kontener obrazu -->
+    <div class="image-container" style="max-height: 70vh; overflow: auto; border: 1px solid #dee2e6; border-radius: 0.375rem; background-color: #f8f9fa; text-align: center; padding: 20px;">
+      <img id="previewImage"
+           src="{{ url_for('document_preview', doc_id=doc.id) }}"
+           alt="Podgląd: {{ doc.original_filename }}"
+           class="img-fluid"
+           style="max-width: 100%; height: auto; transition: transform 0.2s ease; cursor: grab;"
+           onload="updateImageInfo()"
+           ondragstart="return false;">
+    </div>
+
+    <!-- Informacja o OCR -->
+    {% if doc.ocr_status == 'done' %}
+    <div class="alert alert-success mt-3">
+      <i class="bi bi-check-circle me-2"></i>
+      <strong>OCR zakończony!</strong>
+      Tekst został rozpoznany z tego obrazu.
+      <a href="{{ url_for('document_image_viewer', doc_id=doc.id) }}" class="alert-link">
+        Użyj zaawansowanego podglądu
+      </a>
+      aby zobaczyć rozpoznany tekst i zaznaczać fragmenty.
+    </div>
+    {% elif doc.ocr_status == 'none' %}
+    <div class="alert alert-info mt-3">
+      <i class="bi bi-info-circle me-2"></i>
+      <strong>OCR nie został uruchomiony.</strong>
+      Możesz uruchomić rozpoznawanie tekstu w
+      <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="alert-link">szczegółach dokumentu</a>.
+    </div>
+    {% elif doc.ocr_status in ['pending', 'running'] %}
+    <div class="alert alert-warning mt-3">
+      <i class="bi bi-hourglass-split me-2"></i>
+      <strong>OCR w trakcie przetwarzania...</strong>
+      Rozpoznawanie tekstu z tego obrazu jest obecnie wykonywane.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Informacje o obrazie -->
+<div class="card mt-3">
+  <div class="card-header">
+    <h6 class="mb-0">
+      <i class="bi bi-info-circle me-2"></i>Informacje o obrazie
+    </h6>
+  </div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-6">
+        <ul class="list-unstyled mb-0">
+          <li><strong>Nazwa pliku:</strong> {{ doc.original_filename }}</li>
+          <li><strong>Typ MIME:</strong> {{ doc.mime_type or "Nieznany" }}</li>
+          <li><strong>Data dodania:</strong> {{ doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</li>
+          <li><strong>Wymiary:</strong> <span id="imageDimensions">Ładowanie...</span></li>
+        </ul>
+      </div>
+      <div class="col-md-6">
+        <ul class="list-unstyled mb-0">
+          <li><strong>Sygnatura:</strong> {{ doc.sygnatura or "Brak" }}</li>
+          <li><strong>Typ dokumentu:</strong> {{ doc.doc_type or "Nieznany" }}</li>
+          {% if doc.last_modified %}
+          <li><strong>Ostatnia modyfikacja:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') }}</li>
+          {% endif %}
+          <li><strong>Status OCR:</strong>
+            {% if doc.ocr_status == 'done' %}
+              <span class="badge bg-success">Zakończony</span>
+              {% if doc.ocr_confidence %}
+                <small class="text-muted">({{ (doc.ocr_confidence * 100) | round }}% pewności)</small>
+              {% endif %}
+            {% elif doc.ocr_status == 'running' %}
+              <span class="badge bg-primary">W trakcie</span>
+            {% elif doc.ocr_status == 'pending' %}
+              <span class="badge bg-warning">Oczekuje</span>
+            {% elif doc.ocr_status == 'fail' %}
+              <span class="badge bg-danger">Błąd</span>
+            {% else %}
+              <span class="badge bg-secondary">Niewykonany</span>
+            {% endif %}
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    {% if doc.note %}
+    <div class="mt-3">
+      <strong>Notatka:</strong>
+      <div class="card bg-light mt-2">
+        <div class="card-body py-2">
+          <small>{{ doc.note }}</small>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentZoom = 1.0;
+let isDragging = false;
+let startX, startY, scrollLeft, scrollTop;
+
+// Funkcje zoomu
+function zoomIn() {
+  currentZoom *= 1.2;
+  applyZoom();
+}
+
+function zoomOut() {
+  currentZoom /= 1.2;
+  if (currentZoom < 0.1) currentZoom = 0.1;
+  applyZoom();
+}
+
+function resetZoom() {
+  currentZoom = 1.0;
+  applyZoom();
+}
+
+function fitToScreen() {
+  const img = document.getElementById('previewImage');
+  const container = img.parentElement;
+
+  const containerWidth = container.clientWidth - 40; // odejmij padding
+  const containerHeight = container.clientHeight - 40;
+
+  const scaleX = containerWidth / img.naturalWidth;
+  const scaleY = containerHeight / img.naturalHeight;
+
+  currentZoom = Math.min(scaleX, scaleY, 1.0); // nie powiększaj ponad 100%
+  applyZoom();
+}
+
+function applyZoom() {
+  const img = document.getElementById('previewImage');
+  img.style.transform = `scale(${currentZoom})`;
+
+  // Aktualizuj wskaźnik zoom
+  document.getElementById('zoomLevel').textContent = Math.round(currentZoom * 100) + '%';
+
+  // Zmień kursor w zależności od zoom
+  if (currentZoom > 1.0) {
+    img.style.cursor = 'grab';
+  } else {
+    img.style.cursor = 'default';
+  }
+}
+
+// Funkcja aktualizacji informacji o obrazie
+function updateImageInfo() {
+  const img = document.getElementById('previewImage');
+
+  // Wymiary obrazu
+  const dimensions = `${img.naturalWidth} × ${img.naturalHeight} px`;
+  document.getElementById('imageDimensions').textContent = dimensions;
+
+  // Rozmiar pliku (przybliżony na podstawie wymiarów)
+  const fileSizeKB = Math.round((img.naturalWidth * img.naturalHeight * 3) / 1024); // przybliżenie dla RGB
+  document.getElementById('imageSize').textContent = `~${fileSizeKB} KB`;
+}
+
+// Obsługa przeciągania obrazu przy zoom
+document.addEventListener('DOMContentLoaded', function() {
+  const container = document.querySelector('.image-container');
+  const img = document.getElementById('previewImage');
+
+  // Rozpoczęcie przeciągania
+  img.addEventListener('mousedown', function(e) {
+    if (currentZoom <= 1.0) return;
+
+    isDragging = true;
+    img.style.cursor = 'grabbing';
+
+    startX = e.pageX - container.offsetLeft;
+    startY = e.pageY - container.offsetTop;
+    scrollLeft = container.scrollLeft;
+    scrollTop = container.scrollTop;
+
+    e.preventDefault();
+  });
+
+  // Przeciąganie
+  container.addEventListener('mousemove', function(e) {
+    if (!isDragging) return;
+
+    e.preventDefault();
+    const x = e.pageX - container.offsetLeft;
+    const y = e.pageY - container.offsetTop;
+    const walkX = (x - startX) * 2;
+    const walkY = (y - startY) * 2;
+
+    container.scrollLeft = scrollLeft - walkX;
+    container.scrollTop = scrollTop - walkY;
+  });
+
+  // Zakończenie przeciągania
+  document.addEventListener('mouseup', function() {
+    if (isDragging) {
+      isDragging = false;
+      img.style.cursor = currentZoom > 1.0 ? 'grab' : 'default';
+    }
+  });
+
+  // Zoom scrollem myszy
+  container.addEventListener('wheel', function(e) {
+    e.preventDefault();
+
+    if (e.deltaY < 0) {
+      zoomIn();
+    } else {
+      zoomOut();
+    }
+  });
+
+  // Dopasuj do ekranu przy załadowaniu
+  setTimeout(fitToScreen, 100);
+});
+
+// Obsługa klawiszy
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+  switch(e.key) {
+    case '+':
+    case '=':
+      e.preventDefault();
+      zoomIn();
+      break;
+    case '-':
+      e.preventDefault();
+      zoomOut();
+      break;
+    case '0':
+      e.preventDefault();
+      resetZoom();
+      break;
+    case 'f':
+    case 'F':
+      e.preventDefault();
+      fitToScreen();
+      break;
+  }
+});
+</script>
+
+<style>
+.image-container {
+  position: relative;
+  user-select: none;
+}
+
+#previewImage {
+  transform-origin: center center;
+}
+
+.image-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+/* Ukryj paski przewijania w kontenerze obrazu */
+.image-container::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.image-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.image-container::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+.image-container::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+</style>
+{% endblock %}

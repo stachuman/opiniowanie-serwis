@@ -23,9 +23,9 @@ from datetime import datetime
 from app.db import engine, FILES_DIR, BASE_DIR, init_db
 from app.models import Document
 from app.document_utils import (
-    detect_mime_type, 
-    check_file_extension, 
-    get_content_type_from_mime, 
+    detect_mime_type,
+    check_file_extension,
+    get_content_type_from_mime,
     STEP_ICON
 )
 from app.text_extraction import get_text_preview
@@ -47,15 +47,17 @@ app.include_router(opinions_router)
 app.include_router(documents_router)
 app.include_router(updates_router)
 
+
 @app.on_event("startup")
 async def startup():
     """Inicjalizacja aplikacji przy starcie."""
     # Ensure database tables are created
     init_db()
-    
+
     # Uruchomienie nowego systemu workerów zadań w tle
     from app.background_tasks import start_background_workers
     asyncio.create_task(start_background_workers())
+
 
 # Middleware do monitorowania wydajności
 @app.middleware("http")
@@ -63,24 +65,25 @@ async def detect_blocking_operations(request: Request, call_next):
     """Middleware do wykrywania blokujących operacji."""
     # Rozpocznij liczenie czasu
     start_time = time.time()
-    
+
     # Zidentyfikuj żądanie
     request_id = str(uuid.uuid4())[:8]
     path = request.url.path
     print(f"[{request_id}] Rozpoczęto żądanie: {path}")
-    
+
     # Wykonaj żądanie
     response = await call_next(request)
-    
+
     # Sprawdź czas wykonania
     elapsed = time.time() - start_time
     print(f"[{request_id}] Zakończono żądanie: {path} w {elapsed:.4f}s")
-    
+
     # Loguj długie żądania
     if elapsed > 1.0:
         print(f"[{request_id}] UWAGA: Długie żądanie ({elapsed:.4f}s): {path}")
-    
+
     return response
+
 
 # ==================== ENDPOINTY UPLOAD ====================
 @app.get("/upload")
@@ -106,6 +109,7 @@ def upload_form(request: Request):
     }
 
     return templates.TemplateResponse("upload.html", context)
+
 
 @app.post("/upload")
 async def upload(request: Request, files: list[UploadFile] = File(...)):
@@ -157,6 +161,7 @@ async def upload(request: Request, files: list[UploadFile] = File(...)):
     else:
         return RedirectResponse(request.url_for("list_opinions"), status_code=303)
 
+
 # ==================== ENDPOINTY TWORZENIA OPINII ====================
 @app.get("/create_empty_opinion")
 def create_empty_opinion_form(request: Request):
@@ -176,6 +181,7 @@ def create_empty_opinion_form(request: Request):
     }
 
     return templates.TemplateResponse("create_empty_opinion.html", context)
+
 
 @app.post("/create_empty_opinion")
 def create_empty_opinion(
@@ -208,6 +214,7 @@ def create_empty_opinion(
     # Przekieruj do widoku szczegółów opinii
     return RedirectResponse(request.url_for("opinion_detail", doc_id=opinion_id), status_code=303)
 
+
 # ==================== ENDPOINTY SZYBKIEGO OCR ====================
 
 @app.get("/quick_ocr")
@@ -234,11 +241,12 @@ def quick_ocr_form(request: Request):
 
     return templates.TemplateResponse("quick_ocr.html", context)
 
+
 @app.post("/quick_ocr")
 async def quick_ocr(request: Request, files: list[UploadFile] = File(...)):
     """Szybki OCR - dodawanie dokumentów bez wiązania z opinią."""
     uploaded_docs = []
-    
+
     # Utwórz lub pobierz specjalną "opinię" dla dokumentów niezwiązanych
     with Session(engine) as session:
         # Sprawdź czy istnieje specjalna opinia dla dokumentów niezwiązanych
@@ -247,7 +255,7 @@ async def quick_ocr(request: Request, files: list[UploadFile] = File(...)):
             Document.doc_type == "Dokumenty niezwiązane z opiniami"
         )
         special_opinion = session.exec(special_opinion_query).first()
-        
+
         # Jeśli nie istnieje, utwórz ją
         if not special_opinion:
             special_opinion = Document(
@@ -266,34 +274,34 @@ async def quick_ocr(request: Request, files: list[UploadFile] = File(...)):
             special_opinion_id = special_opinion.id
         else:
             special_opinion_id = special_opinion.id
-    
+
     # Przetwarzanie wgranych plików
     for file in files:
         # Sprawdzenie rozszerzenia pliku
         suffix = check_file_extension(file.filename)
-        
+
         # Ignorujemy pliki Word w szybkim OCR
         if suffix.lower() in ['.doc', '.docx']:
             continue
-        
+
         # Generowanie unikalnej nazwy pliku
         unique_name = f"{uuid.uuid4().hex}{suffix}"
         dest = FILES_DIR / unique_name
-        
+
         # Zapisanie pliku
         content = await file.read()
         with open(dest, "wb") as buffer:
             buffer.write(content)
-        
+
         # Wykrywanie właściwego MIME typu pliku
         actual_mime_type = detect_mime_type(dest)
-        
+
         # Określanie content_type na podstawie MIME type
         content_type = get_content_type_from_mime(actual_mime_type)
-        
+
         # Ustal właściwy status OCR
         ocr_status = "pending"
-        
+
         # Zapisanie do bazy danych
         with Session(engine) as session:
             new_doc = Document(
@@ -312,12 +320,13 @@ async def quick_ocr(request: Request, files: list[UploadFile] = File(...)):
             session.add(new_doc)
             session.commit()
             uploaded_docs.append(new_doc.id)
-    
+
     # Uruchom OCR dla wgranych dokumentów
     asyncio.create_task(_enqueue_ocr_documents_nonblocking(uploaded_docs))
-    
+
     # Przekieruj do listy dokumentów
     return RedirectResponse(request.url_for("list_documents"), status_code=303)
+
 
 # ==================== ENDPOINTY UPLOADU DO OPINII ====================
 
@@ -331,12 +340,12 @@ def opinion_upload_form(request: Request, doc_id: int):
 
         # NOWE: Zbuduj nawigację
         from app.navigation import BreadcrumbBuilder
-        
+
         breadcrumbs = (BreadcrumbBuilder(request)
-                      .add_home()
-                      .add_opinion(opinion)
-                      .add_current("Dodaj dokumenty", "plus-circle")
-                      .build())
+                       .add_home()
+                       .add_opinion(opinion)
+                       .add_current("Dodaj dokumenty", "plus-circle")
+                       .build())
 
         navigation = {
             'breadcrumbs': breadcrumbs,
@@ -344,22 +353,23 @@ def opinion_upload_form(request: Request, doc_id: int):
             'page_actions': [],
             'context_info': []
         }
-    
+
     from app.document_utils import ALLOWED_EXTENSIONS
     allowed_types = ", ".join(ALLOWED_EXTENSIONS.keys())
-    
+
     context = {
-        "request": request, 
+        "request": request,
         "opinion": opinion,
         "allowed_types": allowed_types,
         "current_year": datetime.now().year,  # Dodaj rok
         **navigation
     }
-    
+
     return templates.TemplateResponse("upload_to_opinion.html", context)
 
+
 @app.post("/opinion/{doc_id}/upload")
-async def opinion_upload(request: Request, doc_id: int, 
+async def opinion_upload(request: Request, doc_id: int,
                          doc_type: str = Form(...),
                          files: list[UploadFile] = File(...),
                          run_ocr: bool = Form(False)):
@@ -369,7 +379,7 @@ async def opinion_upload(request: Request, doc_id: int,
         opinion = session.get(Document, doc_id)
         if not opinion or not opinion.is_main:
             raise HTTPException(status_code=404, detail="Nie znaleziono opinii")
-    
+
     uploaded_docs = []
     has_ocr_docs = False  # Flaga wskazująca, czy jakiekolwiek dokumenty wymagają OCR
 
@@ -377,33 +387,33 @@ async def opinion_upload(request: Request, doc_id: int,
     for file in files:
         # Sprawdzenie rozszerzenia pliku
         suffix = check_file_extension(file.filename)
-        
+
         # Generowanie unikalnej nazwy pliku
         unique_name = f"{uuid.uuid4().hex}{suffix}"
         dest = FILES_DIR / unique_name
-        
+
         # Zapisanie pliku
         content = await file.read()
-        
+
         with open(dest, "wb") as buffer:
             buffer.write(content)
-        
+
         # Wykrywanie właściwego MIME typu pliku
         actual_mime_type = detect_mime_type(dest)
-        
+
         # Określanie content_type na podstawie MIME type
         content_type = get_content_type_from_mime(actual_mime_type)
-        
+
         # Jeśli to nowy dokument główny, nie powiązuj go z obecną opinią
         is_main = content_type == "opinion" and doc_type == "Opinia"
         parent_id = None if is_main else doc_id
-        
+
         # Ustal właściwy status OCR
         ocr_status = "none"
         if run_ocr and content_type != "opinion":
             ocr_status = "pending"
             has_ocr_docs = True  # Zaznacz, że co najmniej jeden dokument wymaga OCR
-        
+
         # Zapisanie do bazy danych
         with Session(engine) as session:
             new_doc = Document(
@@ -422,7 +432,7 @@ async def opinion_upload(request: Request, doc_id: int,
             )
             session.add(new_doc)
             session.commit()
-            
+
             uploaded_docs.append(new_doc.id)
 
     # Uruchom OCR dla wgranych dokumentów w tle
@@ -434,11 +444,12 @@ async def opinion_upload(request: Request, doc_id: int,
 
     if has_ocr_docs:
         return RedirectResponse(
-            f"{redirect_url}?ocr_started=true&count={len(uploaded_docs)}", 
+            f"{redirect_url}?ocr_started=true&count={len(uploaded_docs)}",
             status_code=303
         )
     else:
         return RedirectResponse(redirect_url, status_code=303)
+
 
 # ==================== ENDPOINTY OCR ====================
 
@@ -454,14 +465,15 @@ async def document_run_ocr(request: Request, doc_id: int):
         doc.ocr_progress_info = "Oczekuje w kolejce"
         session.add(doc)
         session.commit()
-    
+
     # Dodaj do kolejki OCR
     from app.background_tasks import enqueue_ocr_task
     asyncio.create_task(enqueue_ocr_task(doc_id))
-    
+
     # Dodaj parametr do URL przekierowania, aby pokazać powiadomienie
     redirect_url = request.url_for("document_detail", doc_id=doc_id)
     return RedirectResponse(f"{redirect_url}?ocr_restarted=true", status_code=303)
+
 
 @app.get("/api/document/{doc_id}/ocr-progress")
 def document_ocr_progress(doc_id: int):
@@ -470,7 +482,7 @@ def document_ocr_progress(doc_id: int):
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
-        
+
         # Przygotuj dane o postępie
         progress_data = {
             "status": doc.ocr_status,
@@ -480,8 +492,9 @@ def document_ocr_progress(doc_id: int):
             "total_pages": doc.ocr_total_pages or 0,
             "confidence": doc.ocr_confidence
         }
-        
+
         return progress_data
+
 
 # ==================== ENDPOINTY PODGLĄDU ====================
 
@@ -492,7 +505,7 @@ def document_preview_content(request: Request, doc_id: int):
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Nie ma takiego dokumentu")
-        
+
         # Sprawdź, czy istnieje wynik OCR (dokument TXT)
         ocr_txt = None
         if doc.ocr_status == "done":
@@ -501,10 +514,11 @@ def document_preview_content(request: Request, doc_id: int):
                 Document.doc_type == "OCR TXT"
             )
             ocr_txt = session.exec(ocr_txt_query).first()
-    
+
     # Tu powinna być długa funkcja generująca HTML podglądu
     # Można ją wynieść do osobnego modułu jeśli będzie za długa
     return _generate_preview_html(request, doc, ocr_txt)
+
 
 # ==================== ENDPOINTY PDF VIEWER ====================
 
@@ -519,32 +533,32 @@ async def document_ocr_selection(request: Request, doc_id: int):
     import tempfile
     from PIL import Image
     from tasks.ocr.config import logger
-    
+
     try:
         # Pobierz dane z POST
         data = await request.json()
-        page = data.get('page', 1)     # Numer strony (1-based dla PDF, zawsze 1 dla obrazów)
-        x1 = data.get('x1', 0)         # Współrzędne zaznaczenia (0-1)
+        page = data.get('page', 1)  # Numer strony (1-based dla PDF, zawsze 1 dla obrazów)
+        x1 = data.get('x1', 0)  # Współrzędne zaznaczenia (0-1)
         y1 = data.get('y1', 0)
         x2 = data.get('x2', 1)
         y2 = data.get('y2', 1)
         skip_pdf_embed = data.get('skip_pdf_embed', False)
-        
+
         # Sprawdź czy dokument istnieje
         with Session(engine) as session:
             doc = session.get(Document, doc_id)
             if not doc:
                 return {"error": "Nie znaleziono dokumentu"}
-            
+
             # Sprawdź, czy to jest PDF lub obraz
             if not doc.mime_type or (doc.mime_type != 'application/pdf' and not doc.mime_type.startswith('image/')):
                 return {"error": "Ta funkcja obsługuje tylko pliki PDF i obrazy"}
-            
+
             # Ścieżka do pliku
             file_path = FILES_DIR / doc.stored_filename
             if not file_path.exists():
                 return {"error": "Nie znaleziono pliku"}
-            
+
             # Obsługa PDF
             if doc.mime_type == 'application/pdf':
                 # Pobierz liczbę stron z PDF
@@ -552,17 +566,17 @@ async def document_ocr_selection(request: Request, doc_id: int):
                     with open(file_path, 'rb') as pdf_file:
                         pdf_reader = PyPDF2.PdfReader(pdf_file)
                         total_pages = len(pdf_reader.pages)
-                        
+
                         # Sprawdź, czy żądana strona istnieje
                         if page <= 0 or page > total_pages:
                             return {"error": f"Strona {page} nie istnieje. Dokument ma {total_pages} stron."}
                 except Exception as e:
                     logger.error(f"Błąd odczytu dokumentu PDF: {str(e)}", exc_info=True)
                     return {"error": f"Nie można odczytać dokumentu PDF: {str(e)}"}
-                
+
                 # Sprawdź czy to jest zaznaczenie całej strony
                 is_full_page = (abs(x1) < 0.01 and abs(y1) < 0.01 and abs(x2 - 1.0) < 0.01 and abs(y2 - 1.0) < 0.01)
-                
+
                 # Jeśli to zaznaczenie całej strony, sprawdź czy mamy już OCR
                 if is_full_page:
                     ocr_txt_query = select(Document).where(
@@ -570,7 +584,7 @@ async def document_ocr_selection(request: Request, doc_id: int):
                         Document.doc_type == "OCR TXT"
                     )
                     ocr_txt = session.exec(ocr_txt_query).first()
-                    
+
                     if ocr_txt:
                         # Mamy już OCR, zwróć go
                         from app.text_extraction import get_ocr_text_for_document
@@ -583,30 +597,30 @@ async def document_ocr_selection(request: Request, doc_id: int):
                                 "total_pages": total_pages,
                                 "is_full_page": True
                             }
-                
+
                 # Konwertuj stronę PDF na obraz
                 try:
                     # Konwertuj tylko wybraną stronę
                     images = convert_from_path(str(file_path), first_page=page, last_page=page, dpi=300)
-                    
+
                     if not images:
                         return {"error": "Nie można skonwertować strony PDF na obraz"}
-                    
+
                     # Weź pierwszy obraz strony
                     image = images[0]
-                    
+
                 except Exception as e:
                     logger.error(f"Błąd konwersji PDF na obraz: {str(e)}", exc_info=True)
                     return {"error": f"Błąd podczas konwersji PDF na obraz: {str(e)}"}
-                    
+
             # Obsługa obrazów
             elif doc.mime_type.startswith('image/'):
                 # Dla obrazów nie ma stron, zawsze używamy strony 1
                 total_pages = 1
-                
+
                 # Sprawdź czy to jest zaznaczenie całego obrazu
                 is_full_image = (abs(x1) < 0.01 and abs(y1) < 0.01 and abs(x2 - 1.0) < 0.01 and abs(y2 - 1.0) < 0.01)
-                
+
                 # Jeśli to zaznaczenie całego obrazu, sprawdź czy mamy już OCR
                 if is_full_image:
                     ocr_txt_query = select(Document).where(
@@ -614,7 +628,7 @@ async def document_ocr_selection(request: Request, doc_id: int):
                         Document.doc_type == "OCR TXT"
                     )
                     ocr_txt = session.exec(ocr_txt_query).first()
-                    
+
                     if ocr_txt:
                         # Mamy już OCR, zwróć go
                         from app.text_extraction import get_ocr_text_for_document
@@ -627,35 +641,35 @@ async def document_ocr_selection(request: Request, doc_id: int):
                                 "total_pages": 1,
                                 "is_full_image": True
                             }
-                
+
                 # Otwórz obraz bezpośrednio
                 try:
                     image = Image.open(file_path)
                 except Exception as e:
                     logger.error(f"Błąd otwarcia obrazu: {str(e)}", exc_info=True)
                     return {"error": f"Nie można otworzyć obrazu: {str(e)}"}
-                    
+
             # Oblicz współrzędne zaznaczenia w pikselach
             width, height = image.size
             crop_x1 = int(x1 * width)
             crop_y1 = int(y1 * height)
             crop_x2 = int(x2 * width)
             crop_y2 = int(y2 * height)
-            
+
             # Dodaj margines do zaznaczenia
             margin = 5
             crop_x1 = max(0, crop_x1 - margin)
             crop_y1 = max(0, crop_y1 - margin)
             crop_x2 = min(width, crop_x2 + margin)
             crop_y2 = min(height, crop_y2 + margin)
-            
+
             # Wytnij zaznaczony fragment
             crop_image = image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
-            
+
             # Zapisz wycięty fragment do pliku tymczasowego
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 tmp_path = tmp.name
-            
+
             # Opcjonalne powiększenie małych fragmentów
             crop_width, crop_height = crop_image.size
             min_dimension = 300
@@ -664,19 +678,19 @@ async def document_ocr_selection(request: Request, doc_id: int):
                 new_width = int(crop_width * scale_factor)
                 new_height = int(crop_height * scale_factor)
                 crop_image = crop_image.resize((new_width, new_height), Image.LANCZOS)
-            
+
             # Zapisz obraz fragmentu
             crop_image.save(tmp_path, format="PNG", quality=95)
-            
+
             try:
                 # Uruchom OCR na wyciętym fragmencie
                 instruction = "Extract all the text visible in this image fragment. Keep all formatting."
                 fragment_text = process_image_to_text(tmp_path, instruction=instruction)
-                
+
                 # Usuń plik tymczasowy
                 import os
                 os.unlink(tmp_path)
-                
+
                 # Zwróć wynik
                 return {
                     "success": True,
@@ -684,7 +698,7 @@ async def document_ocr_selection(request: Request, doc_id: int):
                     "page": page,
                     "total_pages": total_pages
                 }
-                
+
             except Exception as e:
                 logger.error(f"Błąd OCR fragmentu: {str(e)}", exc_info=True)
                 return {
@@ -694,7 +708,7 @@ async def document_ocr_selection(request: Request, doc_id: int):
                     "total_pages": total_pages,
                     "error_fragment_ocr": str(e)
                 }
-    
+
     except Exception as e:
         logger.error(f"Globalny błąd OCR zaznaczenia: {str(e)}", exc_info=True)
         return {"error": f"Błąd: {str(e)}"}
@@ -755,7 +769,7 @@ def document_image_viewer(request: Request, doc_id: int):
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
-        
+
         # Sprawdź czy dokument to obraz
         if not doc.mime_type or not doc.mime_type.startswith('image/'):
             raise HTTPException(status_code=400, detail="Ten widok jest dostępny tylko dla plików obrazowych")
@@ -767,40 +781,41 @@ def document_image_viewer(request: Request, doc_id: int):
 
         # NOWE: Zbuduj nawigację
         from app.navigation import BreadcrumbBuilder
-        
+
         breadcrumbs = BreadcrumbBuilder(request)
-        
+
         if parent_opinion:
             # Dokument należy do opinii
             breadcrumbs.add_home().add_opinion(parent_opinion).add_document(doc)
         else:
             # Dokument samodzielny
             breadcrumbs.add_documents().add_document(doc)
-            
+
         breadcrumbs.add_current("Zaawansowany podgląd obrazu", "search")
-        
+
         navigation = {
             'breadcrumbs': breadcrumbs.build(),
             'page_title': f"Podgląd obrazu z zaznaczaniem - {doc.original_filename}",
             'page_actions': [],
             'context_info': []
         }
-    
+
     context = {
-        "request": request, 
+        "request": request,
         "doc": doc,
         "current_year": datetime.now().year,
         **navigation
     }
-    
+
     return templates.TemplateResponse("image_view_with_selection.html", context)
+
 
 # ==================== FUNKCJE POMOCNICZE ====================
 
 async def _enqueue_ocr_documents_nonblocking(doc_ids: list[int]):
     """Asynchronicznie wstawia dokumenty do kolejki OCR bez blokowania."""
     from app.background_tasks import enqueue_ocr_task
-    
+
     for doc_id in doc_ids:
         try:
             with Session(engine) as session:
@@ -812,11 +827,12 @@ async def _enqueue_ocr_documents_nonblocking(doc_ids: list[int]):
             print(f"Błąd podczas dodawania dokumentu {doc_id} do kolejki OCR: {str(e)}")
             continue
 
+
 def _generate_preview_html(request: Request, doc: Document, ocr_txt: Document = None) -> str:
     """Generuje HTML podglądu dokumentu - można wynieść do osobnego modułu."""
     # Przygotuj ścieżkę do pliku
     file_path = FILES_DIR / doc.stored_filename
-    
+
     # Jeśli plik nie istnieje, zwróć błąd
     if not file_path.exists():
         return """
@@ -825,29 +841,29 @@ def _generate_preview_html(request: Request, doc: Document, ocr_txt: Document = 
             Plik nie istnieje.
         </div>
         """
-    
+
     # Sprawdź typ pliku i przygotuj odpowiedni podgląd
     mime_type = doc.mime_type
     if not mime_type:
         mime_type = detect_mime_type(file_path)
-    
+
     # Generuj odpowiednie URL-e
     download_url = str(request.url_for("document_download", doc_id=doc.id))
-    
+
     # Dla Word (DOCX/DOC) wygeneruj podgląd tekstowy
-    if mime_type in ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
+    if mime_type in ['application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                      'application/msword']:
         try:
             # Spróbuj użyć python-docx do odczytania zawartości
             from docx import Document as DocxDocument
             word_doc = DocxDocument(file_path)
-            
+
             # Ekstrakcja tekstu
             text_content = []
             for para in word_doc.paragraphs:
                 if para.text.strip():  # Pomijaj puste linie
                     text_content.append(para.text)
-            
+
             # Jeśli nie ma treści, zwróć komunikat
             if not text_content:
                 return f"""
@@ -862,13 +878,13 @@ def _generate_preview_html(request: Request, doc: Document, ocr_txt: Document = 
                     </div>
                 </div>
                 """
-            
+
             # Wygeneruj HTML z treścią dokumentu
             html_content = '<div class="p-4">'
             for paragraph in text_content:
                 html_content += f'<p>{paragraph}</p>'
             html_content += '</div>'
-            
+
             return f"""
             <div class="container-fluid">
                 <div class="row mb-3">
@@ -928,12 +944,12 @@ def _generate_preview_html(request: Request, doc: Document, ocr_txt: Document = 
                     Dokument PDF • Dodano: {doc.upload_time.strftime('%Y-%m-%d %H:%M')}
                 </p>
             </div>
-            
+
             <div class="alert alert-info">
                 <i class="bi bi-info-circle-fill me-2"></i>
                 Podgląd PDF jest dostępny po otwarciu w nowej karcie.
             </div>
-            
+
             <div style="margin-top: 20px;">
                 <a href="{pdf_url}" class="btn btn-primary" target="_blank">
                     <i class="bi bi-eye"></i> Otwórz PDF
@@ -962,6 +978,8 @@ def _generate_preview_html(request: Request, doc: Document, ocr_txt: Document = 
     </div>
     """
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=80)
