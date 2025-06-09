@@ -1,27 +1,208 @@
+<!-- templates/text_preview.html - REFAKTORYZOWANA -->
 {% extends 'base.html' %}
+
+{% set page_type = 'document_preview' %}
+{% set page_title = 'Podgląd pliku: ' + doc.original_filename %}
+
+{% set page_actions = [
+  {'name': 'Powrót', 'url': url_for('document_detail', doc_id=doc.id), 'icon': 'arrow-left', 'class': 'btn-outline-secondary'},
+  {'name': 'Pobierz', 'url': url_for('document_download', doc_id=doc.id), 'icon': 'download', 'class': 'btn-outline-primary'}
+] %}
+
 {% block content %}
 <div class="card">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <h5 class="mb-0">Podgląd pliku: {{ doc.original_filename }}</h5>
-    <div>
-      <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="btn btn-sm btn-outline-secondary">
-        <i class="bi bi-arrow-left"></i> Powrót
-      </a>
-      <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary ms-2">
-        <i class="bi bi-download"></i> Pobierz
-      </a>
-    </div>
-  </div>
   <div class="card-body">
     {% if error_message %}
-      <div class="alert alert-danger">{{ error_message }}</div>
+      <div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        <strong>Błąd:</strong> {{ error_message }}
+      </div>
     {% elif content %}
-      <div class="bg-light p-3 rounded">
-        <pre class="text-content" style="white-space: pre-wrap; font-family: 'Courier New', monospace; max-height: 80vh; overflow-y: auto;">{{ content }}</pre>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <h6 class="mb-0">Zawartość pliku</h6>
+          <small class="text-muted">{{ content|length }} znaków</small>
+        </div>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary" id="copyContentBtn" title="Kopiuj do schowka">
+            <i class="bi bi-clipboard"></i> Kopiuj
+          </button>
+          <button class="btn btn-outline-secondary" id="downloadTxtBtn" title="Pobierz jako .txt">
+            <i class="bi bi-file-earmark-text"></i> Zapisz jako TXT
+          </button>
+          <button class="btn btn-outline-secondary" id="toggleWrapBtn" title="Przełącz zawijanie tekstu">
+            <i class="bi bi-text-wrap"></i> Zawijanie
+          </button>
+        </div>
+      </div>
+      <div class="bg-light p-3 rounded position-relative">
+        <pre id="textContent" class="text-content mb-0" style="white-space: pre-wrap; font-family: 'Courier New', monospace; max-height: 80vh; overflow-y: auto; line-height: 1.4;">{{ content }}</pre>
       </div>
     {% else %}
-      <div class="alert alert-warning">Plik jest pusty lub nie zawiera tekstu.</div>
+      <div class="alert alert-warning">
+        <i class="bi bi-info-circle-fill me-2"></i>
+        Plik jest pusty lub nie zawiera tekstu.
+      </div>
     {% endif %}
   </div>
 </div>
+
+{% if content %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const copyBtn = document.getElementById('copyContentBtn');
+  const downloadBtn = document.getElementById('downloadTxtBtn');
+  const toggleWrapBtn = document.getElementById('toggleWrapBtn');
+  const textContent = document.getElementById('textContent');
+  
+  let wrapEnabled = true;
+
+  // Kopiowanie do schowka
+  copyBtn.addEventListener('click', async function() {
+    const text = textContent.textContent;
+    
+    try {
+      await window.clipboardManager.copyTextToClipboard(text);
+      window.clipboardManager.flashCopied(this);
+      window.alertManager.success('Tekst skopiowany do schowka!', { duration: 3000 });
+    } catch (error) {
+      window.alertManager.error('Nie udało się skopiować tekstu: ' + error.message);
+    }
+  });
+
+  // Pobieranie jako TXT
+  downloadBtn.addEventListener('click', function() {
+    const text = textContent.textContent;
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '{{ doc.original_filename|replace(".", "_") }}_content.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    
+    URL.revokeObjectURL(url);
+    
+    window.alertManager.success('Plik zostanie pobrany', { duration: 3000 });
+  });
+
+  // Przełączanie zawijania tekstu
+  toggleWrapBtn.addEventListener('click', function() {
+    wrapEnabled = !wrapEnabled;
+    
+    if (wrapEnabled) {
+      textContent.style.whiteSpace = 'pre-wrap';
+      this.innerHTML = '<i class="bi bi-text-wrap"></i> Zawijanie';
+      this.title = 'Wyłącz zawijanie tekstu';
+    } else {
+      textContent.style.whiteSpace = 'pre';
+      this.innerHTML = '<i class="bi bi-text-left"></i> Bez zawijania';
+      this.title = 'Włącz zawijanie tekstu';
+    }
+  });
+
+  // Skróty klawiszowe
+  document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'c' && window.getSelection().toString() === '') {
+      // Ctrl+C bez zaznaczenia = kopiuj cały tekst
+      e.preventDefault();
+      copyBtn.click();
+    } else if (e.ctrlKey && e.key === 's') {
+      // Ctrl+S = pobierz jako TXT
+      e.preventDefault();
+      downloadBtn.click();
+    } else if (e.key === 'w' && !e.ctrlKey && !e.altKey && 
+               document.activeElement.tagName !== 'INPUT' && 
+               document.activeElement.tagName !== 'TEXTAREA') {
+      // W = przełącz zawijanie
+      e.preventDefault();
+      toggleWrapBtn.click();
+    }
+  });
+
+  // Informacja o skrótach
+  const helpText = document.createElement('div');
+  helpText.className = 'mt-2 small text-muted';
+  helpText.innerHTML = `
+    <strong>Skróty klawiszowe:</strong> 
+    <kbd>Ctrl+C</kbd> kopiuj cały tekst, 
+    <kbd>Ctrl+S</kbd> pobierz jako TXT, 
+    <kbd>W</kbd> przełącz zawijanie
+  `;
+  
+  textContent.parentNode.appendChild(helpText);
+
+  // Pokaż statystyki tekstu
+  const stats = document.createElement('div');
+  stats.className = 'mt-2 small text-muted';
+  
+  const text = textContent.textContent;
+  const lines = text.split('\n').length;
+  const words = text.trim().split(/\s+/).filter(word => word.length > 0).length;
+  const chars = text.length;
+  const charsNoSpaces = text.replace(/\s/g, '').length;
+  
+  stats.innerHTML = `
+    <strong>Statystyki:</strong> 
+    ${lines} linii, 
+    ${words} słów, 
+    ${chars} znaków (${charsNoSpaces} bez spacji)
+  `;
+  
+  helpText.parentNode.insertBefore(stats, helpText);
+});
+</script>
+{% endif %}
+
+<style>
+.text-content {
+  position: relative;
+}
+
+.text-content:hover {
+  background-color: #e9ecef !important;
+}
+
+/* Lepsze formatowanie dla kodu/tekstu */
+.text-content {
+  font-size: 0.9rem;
+  border: 1px solid #dee2e6;
+  border-radius: 0.375rem;
+  background-color: #ffffff !important;
+}
+
+/* Style dla przycisków */
+.btn-group-sm .btn {
+  font-size: 0.8rem;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .btn-group {
+    flex-direction: column;
+    width: 100%;
+  }
+  
+  .btn-group .btn {
+    border-radius: 0.375rem !important;
+    margin-bottom: 0.25rem;
+  }
+  
+  .text-content {
+    font-size: 0.8rem;
+    max-height: 60vh;
+  }
+}
+
+/* Dark mode support (jeśli będzie używany) */
+@media (prefers-color-scheme: dark) {
+  .text-content {
+    background-color: #2d3748 !important;
+    color: #e2e8f0 !important;
+    border-color: #4a5568;
+  }
+}
+</style>
 {% endblock %}

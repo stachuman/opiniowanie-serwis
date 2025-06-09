@@ -1,298 +1,237 @@
 {% extends 'base.html' %}
 
-<!-- Breadcrumbs, page_title i page_actions są automatyczne z base.html -->
+{# Ustawienia dla base.html #}
+{% set page_type = 'opinion_detail' %}
+{% set page_title = 'Szczegóły opinii' %}
+{% set breadcrumbs = [
+  {'name': 'Lista opinii', 'url': url_for('list_opinions'), 'icon': 'list'},
+  {'name': opinion.sygnatura or opinion.original_filename, 'url': '#', 'icon': 'folder'}
+] %}
+{% set page_actions = [
+  {
+    'name': 'Dodaj dokumenty',
+    'url': url_for('upload_to_opinion_form', doc_id=opinion.id),
+    'icon': 'plus-circle',
+    'class': 'btn-primary'
+  },
+  {
+    'name': 'Edytuj opinię',
+    'url': url_for('document_detail', doc_id=opinion.id),
+    'icon': 'pencil',
+    'class': 'btn-outline-secondary'
+  }
+] %}
 
-<!-- Filtry i wyszukiwanie -->
-{% block context_nav %}
-{% if current_filters.search or current_filters.doc_type_filter or (current_filters.k1 is false) or (current_filters.k2 is false) or (current_filters.k3 is false) or (current_filters.k4 is false) %}
-<div class="context-nav">
-  <form method="get" class="row g-3">
-    <!-- Filtry statusów -->
-    <div class="col-md-4">
-      <label class="form-label">Filtry statusów:</label>
-      <div class="d-flex gap-3">
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" name="k1" value="true" 
-                 {{ 'checked' if current_filters.k1 else '' }} id="filterK1">
-          <label class="form-check-label" for="filterK1">k1</label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" name="k2" value="true" 
-                 {{ 'checked' if current_filters.k2 else '' }} id="filterK2">
-          <label class="form-check-label" for="filterK2">k2</label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" name="k3" value="true" 
-                 {{ 'checked' if current_filters.k3 else '' }} id="filterK3">
-          <label class="form-check-label" for="filterK3">k3</label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" name="k4" value="true" 
-                 {{ 'checked' if current_filters.k4 else '' }} id="filterK4">
-          <label class="form-check-label" for="filterK4">k4</label>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Filtr typu dokumentu -->
-    <div class="col-md-3">
-      <label for="doc_type_filter" class="form-label">Typ dokumentu:</label>
-      <select class="form-select" id="doc_type_filter" name="doc_type_filter">
-        <option value="">Wszystkie typy</option>
-        {% for doc_type in unique_doc_types %}
-          <option value="{{ doc_type }}" 
-                  {{ 'selected' if current_filters.doc_type_filter == doc_type else '' }}>
-            {{ doc_type }}
-          </option>
-        {% endfor %}
-      </select>
-    </div>
-    
-    <!-- Wyszukiwanie -->
-    <div class="col-md-5">
-      <label for="search" class="form-label">Wyszukiwanie:</label>
-      <div class="input-group">
-        <input type="text" class="form-control" id="search" name="search" 
-               value="{{ current_filters.search }}" placeholder="Szukaj w dokumentach...">
-        <button class="btn btn-outline-secondary" type="submit">
-          <i class="bi bi-search"></i>
-        </button>
-      </div>
-      <div class="d-flex gap-3 mt-1">
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" name="search_content" value="true" 
-                 {{ 'checked' if current_filters.search_content else '' }} id="searchContent">
-          <label class="form-check-label" for="searchContent">
-            Szukaj w treści
-          </label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" name="fuzzy_search" value="true" 
-                 {{ 'checked' if current_filters.fuzzy_search else '' }} id="fuzzySearch">
-          <label class="form-check-label" for="fuzzySearch">
-            Wyszukiwanie rozmyte
-          </label>
-        </div>
-      </div>
-    </div>
-  </form>
-</div>
-{% endif %}
-{% endblock %}
+{# Informacje kontekstowe #}
+{% set context_info = [
+  {'label': 'Sygnatura', 'value': opinion.sygnatura or 'Brak'},
+  {'label': 'Status', 'value': steps_dict.get(opinion.step, opinion.step), 'badge_class': 'badge bg-' + ('danger' if opinion.step == 'k1' else 'warning' if opinion.step == 'k2' else 'success' if opinion.step == 'k3' else 'secondary')},
+  {'label': 'Typ dokumentu', 'value': opinion.doc_type or 'Nieznany'},
+  {'label': 'Data utworzenia', 'value': opinion.upload_time.strftime('%Y-%m-%d %H:%M')}
+] %}
 
 {% block content %}
-<!-- Tabela dokumentów -->
-<div class="card">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span>
-      <i class="bi bi-files me-2"></i>Lista dokumentów 
-      <span class="badge bg-secondary ms-2">{{ total_count }}</span>
-    </span>
-    
-    <!-- Dodatkowe informacje -->
-    {% if current_filters.search or current_filters.doc_type_filter %}
-      <small class="text-muted">
-        {% if current_filters.search %}
-          Wyszukiwanie: "{{ current_filters.search }}"
+<!-- Główny dokument opinii -->
+<div class="card mb-4">
+  <div class="card-header bg-light">
+    <div class="d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">
+        <i class="bi bi-file-earmark-word text-primary me-2"></i>
+        Dokument główny: {{ opinion.original_filename }}
+      </h5>
+      <div class="btn-group">
+        <a href="{{ url_for('document_preview', doc_id=opinion.id) }}" class="btn btn-sm btn-outline-primary" target="_blank">
+          <i class="bi bi-eye"></i> Podgląd
+        </a>
+        <a href="{{ url_for('document_download', doc_id=opinion.id) }}" class="btn btn-sm btn-outline-secondary">
+          <i class="bi bi-download"></i> Pobierz
+        </a>
+        {% if opinion.mime_type and 'word' in opinion.mime_type %}
+        <a href="{{ url_for('document_update_form', doc_id=opinion.id) }}" class="btn btn-sm btn-outline-warning">
+          <i class="bi bi-pencil"></i> Aktualizuj
+        </a>
         {% endif %}
-        {% if current_filters.doc_type_filter %}
-          | Typ: {{ current_filters.doc_type_filter }}
-        {% endif %}
-      </small>
-    {% endif %}
+      </div>
+    </div>
   </div>
-  
+
+  {% if opinion.note %}
+  <div class="card-body">
+    <div class="alert alert-light">
+      <strong>Notatka do opinii:</strong>
+      <div class="mt-2">{{ opinion.note|replace('\n', '<br>')|safe }}</div>
+      <div class="mt-2">
+        <button type="button" class="btn btn-sm btn-outline-info edit-note-btn"
+                data-doc-id="{{ opinion.id }}" data-current-note="{{ opinion.note }}">
+          <i class="bi bi-pencil"></i> Edytuj notatkę
+        </button>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="card-body">
+    <div class="text-muted text-center py-2">
+      <i class="bi bi-sticky me-2"></i>Brak notatki do opinii
+      <button type="button" class="btn btn-sm btn-outline-info ms-2 edit-note-btn"
+              data-doc-id="{{ opinion.id }}" data-current-note="">
+        <i class="bi bi-plus"></i> Dodaj notatkę
+      </button>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Dokumenty powiązane z opinią -->
+<div class="card">
+  <div class="card-header">
+    <div class="d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">
+        <i class="bi bi-files me-2"></i>
+        Dokumenty powiązane
+        <span class="badge bg-secondary ms-2">{{ related_docs|length }}</span>
+      </h5>
+      <a href="{{ url_for('upload_to_opinion_form', doc_id=opinion.id) }}" class="btn btn-sm btn-primary">
+        <i class="bi bi-plus-circle"></i> Dodaj dokumenty
+      </a>
+    </div>
+  </div>
+
   <div class="card-body p-0">
-    {% if docs|length == 0 %}
+    {% if related_docs|length == 0 %}
       <div class="text-center p-5">
-        <i class="bi bi-inbox display-1 text-muted"></i>
-        <h4 class="text-muted mt-3">Brak dokumentów</h4>
-        <p class="text-muted">
-          {% if current_filters.search or current_filters.doc_type_filter %}
-            Nie znaleziono dokumentów pasujących do kryteriów wyszukiwania.
-          {% else %}
-            Nie dodano jeszcze żadnych dokumentów do systemu.
-          {% endif %}
-        </p>
-        {% if not current_filters.search and not current_filters.doc_type_filter %}
-          <div class="d-flex gap-2 justify-content-center">
-            <a href="{{ url_for('upload_form') }}" class="btn btn-primary">
-              <i class="bi bi-file-earmark-word me-1"></i>Dodaj opinię
-            </a>
-            <a href="{{ url_for('quick_ocr_form') }}" class="btn btn-outline-primary">
-              <i class="bi bi-lightning me-1"></i>Szybki OCR
-            </a>
-          </div>
-        {% endif %}
+        <i class="bi bi-files display-4 text-muted"></i>
+        <h6 class="text-muted mt-3">Brak dodatkowych dokumentów</h6>
+        <p class="text-muted">Dodaj dokumenty PDF, skany lub inne pliki związane z tą opinią.</p>
+        <a href="{{ url_for('upload_to_opinion_form', doc_id=opinion.id) }}" class="btn btn-primary">
+          <i class="bi bi-plus-circle me-1"></i>Dodaj pierwszy dokument
+        </a>
       </div>
     {% else %}
       <div class="table-responsive">
         <table class="table table-hover mb-0">
           <thead class="table-light">
             <tr>
-              <th scope="col" width="60">Typ</th>
-              <th scope="col" width="120">Sygnatura</th>
-              <th scope="col" width="140">Typ dok.</th>
-              <th scope="col" class="text-truncate">Nazwa pliku</th>
-              <th scope="col" width="70" class="text-center">Status</th>
-              <th scope="col" width="70" class="text-center">OCR</th>
-              {% if current_filters.search %}
-              <th scope="col" width="80" class="text-center">Dopas.</th>
-              {% endif %}
-              <th scope="col" width="110">Data</th>
-              <th scope="col" width="140" class="text-center">Akcje</th>
+              <th width="60">Typ</th>
+              <th width="120">Typ dok.</th>
+              <th>Nazwa pliku</th>
+              <th width="200">Notatka</th>
+              <th width="80" class="text-center">OCR</th>
+              <th width="110">Data</th>
+              <th width="220" class="text-center">Akcje</th>
             </tr>
           </thead>
           <tbody>
-            {% for doc in docs %}
-            <tr data-href="{{ url_for('document_detail', doc_id=doc.id) }}">
+            {% for doc in related_docs %}
+            <tr>
               <td>
-                <!-- Ikony typów plików -->
-                {% if doc.is_main %}
-                  <i class="bi bi-bookmark-star-fill text-warning" title="Opinia główna"></i>
-                {% elif doc.mime_type and doc.mime_type.startswith('image/') %}
+                {% if doc.mime_type and doc.mime_type.startswith('image/') %}
                   <i class="bi bi-file-earmark-image text-info" title="Obraz"></i>
                 {% elif doc.mime_type == 'application/pdf' %}
                   <i class="bi bi-file-earmark-pdf text-danger" title="PDF"></i>
-                {% elif doc.mime_type and doc.mime_type.startswith('application/') and 'word' in doc.mime_type %}
-                  <i class="bi bi-file-earmark-word text-primary" title="Word"></i>
                 {% elif doc.doc_type == 'OCR TXT' %}
                   <i class="bi bi-file-earmark-text text-success" title="Wynik OCR"></i>
                 {% else %}
                   <i class="bi bi-file-earmark" title="Dokument"></i>
                 {% endif %}
               </td>
-              <td>{{ doc.sygnatura or "" }}</td>
               <td>
-                <div class="text-truncate" style="max-width: 140px;" title="{{ doc.doc_type or 'Brak' }}">
-                  <span class="badge bg-light text-dark">{{ doc.doc_type or "Brak" }}</span>
-                </div>
+                <span class="badge bg-light text-dark">{{ doc.doc_type or "Nieznany" }}</span>
               </td>
               <td>
-                <div class="text-truncate" style="max-width: 200px;" title="{{ doc.original_filename }}">
+                <div class="text-truncate" style="max-width: 250px;" title="{{ doc.original_filename }}">
                   <strong>{{ doc.original_filename }}</strong>
                 </div>
-                {% if doc.is_main %}
-                  <span class="badge bg-warning ms-2">GŁÓWNY</span>
-                {% endif %}
+              </td>
+              <td>
                 {% if doc.note %}
-                  <br><small class="text-muted text-truncate d-block" style="max-width: 200px;" title="{{ doc.note }}">{{ doc.note }}</small>
-                {% endif %}
-              </td>
-              <!-- Status sprawy -->
-              <td class="text-center">
-                {% if doc.step == 'k1' %}
-                  <span class="badge bg-danger p-2">
-                    <i class="bi bi-pencil-fill"></i>
-                  </span>
-                {% elif doc.step == 'k2' %}
-                  <span class="badge bg-warning p-2">
-                    <i class="bi bi-journals"></i>
-                  </span>
-                {% elif doc.step == 'k3' %}
-                  <span class="badge bg-success p-2">
-                    <i class="bi bi-check-circle-fill"></i>
-                  </span>
+                  <div class="text-truncate" style="max-width: 200px;" title="{{ doc.note }}">
+                    <small class="text-muted">{{ doc.note }}</small>
+                  </div>
                 {% else %}
-                  <span class="badge bg-secondary p-2">
-                    <i class="bi bi-archive-fill"></i>
-                  </span>
+                  <span class="text-muted">—</span>
                 {% endif %}
               </td>
-              <!-- Status OCR -->
               <td class="text-center">
                 {% if doc.ocr_status == 'done' %}
-                  <span class="badge bg-success p-2">
+                  <span class="badge bg-success" title="OCR zakończony">
                     <i class="bi bi-check-circle"></i>
-                    {% if doc.ocr_confidence %}
-                      <small class="ms-1">{{ (doc.ocr_confidence * 100) | round }}%</small>
-                    {% endif %}
                   </span>
                 {% elif doc.ocr_status == 'running' %}
-                  <span class="badge bg-primary p-2">
+                  <span class="badge bg-primary" title="OCR w trakcie">
                     <i class="bi bi-arrow-repeat"></i>
                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                   </span>
                 {% elif doc.ocr_status == 'fail' %}
-                  <span class="badge bg-danger p-2">
+                  <span class="badge bg-danger" title="OCR zakończony błędem">
                     <i class="bi bi-x-circle"></i>
                   </span>
                 {% elif doc.ocr_status == 'pending' %}
-                  <span class="badge bg-warning p-2">
+                  <span class="badge bg-warning" title="OCR oczekuje">
                     <i class="bi bi-hourglass-split"></i>
                   </span>
                 {% else %}
                   <span class="text-muted">—</span>
                 {% endif %}
               </td>
-              <!-- Dopasowanie wyszukiwania -->
-              {% if current_filters.search %}
-              <td class="text-center">
-                {% if search_matches.get(doc.id) %}
-                  {% for match_type in search_matches[doc.id] %}
-                    {% if match_type == 'metadata' %}
-                      <span class="badge bg-primary" title="Znaleziono w nazwie, sygnaturze lub typie">META</span>
-                    {% elif match_type == 'fuzzy_metadata' %}
-                      <span class="badge bg-info" title="Znaleziono rozmycie w metadanych">~META</span>
-                    {% elif match_type == 'content' %}
-                      <span class="badge bg-success" title="Znaleziono w treści dokumentu">TREŚĆ</span>
-                    {% elif match_type == 'fuzzy_content' %}
-                      <span class="badge bg-warning" title="Znaleziono rozmycie w treści">~TREŚĆ</span>
-                    {% endif %}
-                  {% endfor %}
-                {% endif %}
-              </td>
-              {% endif %}
               <td>
                 <small>{{ doc.upload_time.strftime('%Y-%m-%d %H:%M') if doc.upload_time else 'Brak' }}</small>
               </td>
               <td class="text-center">
-                <!-- Przyciski akcji z responsywnością -->
-                <!-- Na większych ekranach - przyciski obok siebie -->
-                <div class="d-none d-lg-flex gap-1 justify-content-center">
-                  <a href="{{ url_for('document_detail', doc_id=doc.id) }}"
-                     class="btn btn-outline-primary btn-sm" title="Szczegóły">
-                    <i class="bi bi-eye"></i>
-                  </a>
+                <!-- Przyciski akcji obok siebie (bez dropdown) -->
+                <div class="d-flex gap-1 justify-content-center flex-wrap">
+                  <!-- Główny przycisk - bezpośredni podgląd zaawansowany -->
+                  {% if doc.mime_type == 'application/pdf' %}
+                    <a href="{{ url_for('document_pdf_viewer', doc_id=doc.id) }}"
+                       class="btn btn-primary btn-sm" title="Podgląd PDF z OCR">
+                      <i class="bi bi-search"></i>
+                    </a>
+                  {% elif doc.mime_type and doc.mime_type.startswith('image/') %}
+                    <a href="{{ url_for('document_image_viewer', doc_id=doc.id) }}"
+                       class="btn btn-primary btn-sm" title="Podgląd obrazu z OCR">
+                      <i class="bi bi-search"></i>
+                    </a>
+                  {% else %}
+                    <a href="{{ url_for('document_detail', doc_id=doc.id) }}"
+                       class="btn btn-primary btn-sm" title="Szczegóły dokumentu">
+                      <i class="bi bi-eye"></i>
+                    </a>
+                  {% endif %}
+
+                  <!-- Szczegóły (tylko dla PDF/obrazów) -->
+                  {% if doc.mime_type == 'application/pdf' or (doc.mime_type and doc.mime_type.startswith('image/')) %}
+                    <a href="{{ url_for('document_detail', doc_id=doc.id) }}"
+                       class="btn btn-outline-secondary btn-sm" title="Szczegóły">
+                      <i class="bi bi-info-circle"></i>
+                    </a>
+                  {% endif %}
+
+                  <!-- AI Summary dla dokumentów z OCR -->
+                  {% if doc.ocr_status == 'done' %}
+                    <button type="button" class="btn btn-outline-info btn-sm quick-summary-btn"
+                            data-doc-id="{{ doc.id }}" data-doc-name="{{ doc.original_filename }}" title="Podsumowanie AI">
+                      <i class="bi bi-robot"></i>
+                    </button>
+                  {% endif %}
+
+                  <!-- Edytuj notatkę -->
+                  <button type="button" class="btn btn-outline-warning btn-sm edit-note-btn"
+                          data-doc-id="{{ doc.id }}" data-current-note="{{ doc.note or '' }}" title="{{ 'Edytuj' if doc.note else 'Dodaj' }} notatkę">
+                    <i class="bi bi-sticky"></i>
+                  </button>
+
+                  <!-- Pobierz -->
                   <a href="{{ url_for('document_download', doc_id=doc.id) }}"
                      class="btn btn-outline-secondary btn-sm" title="Pobierz">
                     <i class="bi bi-download"></i>
                   </a>
-                  {% if doc.is_main %}
-                    <a href="{{ url_for('opinion_detail', doc_id=doc.id) }}"
-                       class="btn btn-outline-info btn-sm" title="Opinia">
-                      <i class="bi bi-folder"></i>
+
+                  <!-- OCR (jeśli nie wykonany) -->
+                  {% if doc.ocr_status == 'none' %}
+                    <a href="{{ url_for('document_run_ocr', doc_id=doc.id) }}"
+                       class="btn btn-outline-success btn-sm" title="Uruchom OCR">
+                      <i class="bi bi-play"></i>
                     </a>
                   {% endif %}
-                </div>
-
-                <!-- Na mniejszych ekranach - dropdown menu -->
-                <div class="d-lg-none">
-                  <div class="dropdown">
-                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
-                            data-bs-toggle="dropdown" aria-expanded="false">
-                      <i class="bi bi-gear"></i>
-                    </button>
-                    <ul class="dropdown-menu">
-                      <li>
-                        <a class="dropdown-item" href="{{ url_for('document_detail', doc_id=doc.id) }}">
-                          <i class="bi bi-eye me-2"></i>Szczegóły
-                        </a>
-                      </li>
-                      <li>
-                        <a class="dropdown-item" href="{{ url_for('document_download', doc_id=doc.id) }}">
-                          <i class="bi bi-download me-2"></i>Pobierz
-                        </a>
-                      </li>
-                      {% if doc.is_main %}
-                      <li>
-                        <a class="dropdown-item" href="{{ url_for('opinion_detail', doc_id=doc.id) }}">
-                          <i class="bi bi-folder me-2"></i>Pokaż opinię
-                        </a>
-                      </li>
-                      {% endif %}
-                    </ul>
-                  </div>
                 </div>
               </td>
             </tr>
@@ -304,111 +243,70 @@
   </div>
 
   <!-- Statystyki na dole -->
-  {% if docs|length > 0 %}
+  {% if related_docs|length > 0 %}
   <div class="card-footer text-muted">
     <div class="row text-center">
       <div class="col-md-3">
-        <small><strong>{{ docs|selectattr("is_main")|list|length }}</strong> opinii głównych</small>
+        <small><strong>{{ related_docs|selectattr("ocr_status", "equalto", "done")|list|length }}</strong> z ukończonym OCR</small>
       </div>
       <div class="col-md-3">
-        <small><strong>{{ docs|selectattr("ocr_status", "equalto", "done")|list|length }}</strong> z ukończonym OCR</small>
+        <small><strong>{{ related_docs|selectattr("ocr_status", "equalto", "running")|list|length }}</strong> w trakcie OCR</small>
       </div>
       <div class="col-md-3">
-        <small><strong>{{ docs|selectattr("ocr_status", "equalto", "running")|list|length }}</strong> w trakcie OCR</small>
+        <small><strong>{{ related_docs|selectattr("mime_type", "equalto", "application/pdf")|list|length }}</strong> plików PDF</small>
       </div>
       <div class="col-md-3">
-        <small><strong>{{ docs|selectattr("mime_type", "equalto", ".*pdf.*")|list|length }}</strong> plików PDF</small>
+        <small><strong>{{ related_docs|selectattr("mime_type", "equalto", "image/")|list|length }}</strong> obrazów</small>
       </div>
     </div>
   </div>
   {% endif %}
 </div>
 
-<!-- Dodaj custom CSS dla lepszego wyglądu tabeli -->
-<style>
-/* Tabela responsywna z kontrolowanymi szerokościami */
-.table {
-  table-layout: fixed;
-  width: 100%;
-}
+<!-- Podgląd last modified i inne informacje -->
+{% if opinion.last_modified or related_docs|selectattr("last_modified")|list|length > 0 %}
+<div class="row mt-3">
+  <div class="col-12">
+    <div class="card bg-light">
+      <div class="card-body py-2">
+        <div class="row text-center text-muted small">
+          {% if opinion.last_modified %}
+          <div class="col-md-6">
+            <i class="bi bi-clock me-1"></i>
+            Opinia ostatnio modyfikowana: {{ opinion.last_modified.strftime('%Y-%m-%d %H:%M') }}
+          </div>
+          {% endif %}
 
-/* Zapewnij, że kolumna nazwy pliku nie rozciąga tabeli */
-.table td:nth-child(4) {
-  max-width: 200px;
-  word-wrap: break-word;
-}
-
-/* Kontrola szerokości kolumny typu dokumentu */
-.table td:nth-child(3) {
-  max-width: 140px;
-  word-wrap: break-word;
-}
-
-/* Zapewnij, że przyciski nie wychodzą poza kolumnę */
-.table td:last-child {
-  min-width: 140px;
-  max-width: 140px;
-}
-
-/* Lepsze wyrównanie przycisków na większych ekranach */
-@media (min-width: 992px) {
-  .table td:last-child .d-none.d-lg-flex {
-    justify-content: center;
-    flex-wrap: nowrap;
-  }
-}
-
-/* Zapewnij odpowiednie odstępy między przyciskami */
-.btn-group .btn {
-  margin-right: 2px;
-}
-.btn-group .btn:last-child {
-  margin-right: 0;
-}
-
-/* Dodatkowy margines dla ikon w dropdown */
-.dropdown-item i {
-  width: 16px;
-  text-align: center;
-}
-
-/* Obcinanie tekstu w komórkach */
-.text-truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-</style>
-
+          {% set last_doc_upload = related_docs|selectattr("upload_time")|map(attribute="upload_time")|max %}
+          {% if last_doc_upload %}
+          <div class="col-md-6">
+            <i class="bi bi-plus-circle me-1"></i>
+            Ostatni dokument dodany: {{ last_doc_upload.strftime('%Y-%m-%d %H:%M') }}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
-<!-- Automatyczne odświeżanie dla aktywnych procesów OCR -->
-{% if docs|selectattr("ocr_status", "equalto", "running")|list|length > 0 %}
 <script>
-// Odświeżaj stronę co 10 sekund gdy OCR jest aktywne
-setTimeout(function() {
-  location.reload();
-}, 10000);
-</script>
-{% endif %}
-
-<!-- Script dla zapobiegania kliknięciom w dropdown -->
-<script>
+// Inicjalizacja Opinion Detail Manager
 document.addEventListener('DOMContentLoaded', function() {
-  // Zapobiegaj nawigacji po kliknięciu w dropdown toggle
-  document.querySelectorAll('.dropdown-toggle').forEach(function(toggle) {
-    toggle.addEventListener('click', function(e) {
-      e.stopPropagation();
-    });
-  });
+  // OpinionDetailManager jest ładowany automatycznie przez base.html
+  // gdy page_type = 'opinion_detail'
 
-  // Zapobiegaj nawigacji po kliknięciu w menu dropdown
-  document.querySelectorAll('.dropdown-menu').forEach(function(menu) {
-    menu.addEventListener('click', function(e) {
-      e.stopPropagation();
-    });
-  });
+  console.log('Opinion Detail zainicjalizowana');
+
+  // Automatyczne odświeżanie dla aktywnych procesów OCR
+  {% if related_docs|selectattr("ocr_status", "equalto", "running")|list|length > 0 %}
+  setTimeout(function() {
+    location.reload();
+  }, 10000);
+  {% endif %}
 });
 </script>
 {% endblock %}

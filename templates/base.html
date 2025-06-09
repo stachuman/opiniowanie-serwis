@@ -75,7 +75,130 @@
     .nav-link.active {
       font-weight: 600;
     }
+
+    /* Style dla nowych komponentów JS */
+    .document-preview-container {
+      border: 1px solid #dee2e6;
+      border-radius: 0.375rem;
+      overflow: hidden;
+    }
+
+    .preview-toolbar {
+      background-color: #f8f9fa;
+      border-bottom: 1px solid #dee2e6;
+    }
+
+    .text-editor {
+      transition: all 0.3s ease;
+    }
+
+    .text-display {
+      transition: background-color 0.2s ease;
+    }
+
+    .text-display:hover {
+      background-color: #e9ecef !important;
+    }
+
+    /* OCR Viewer styles */
+    .ocr-viewer-container {
+      position: relative;
+    }
+
+    .ocr-selection-overlay {
+      position: absolute;
+      border: 2px dashed #007bff;
+      background-color: rgba(0, 123, 255, 0.2);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* Word Preview styles */
+    .word-preview-container .word-content {
+      background-color: #fff;
+    }
+
+    /* Alerty pozycjonowane */
+    .alert.position-fixed {
+      z-index: 9999;
+      min-width: 300px;
+      max-width: 450px;
+      box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    }
+
+    /* Loading indicators */
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(255, 255, 255, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    /* Bulk actions bar */
+    #bulkActions {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-radius: 0;
+      margin-bottom: 1rem;
+    }
+
+    /* Auto-refresh indicator */
+    #autoRefreshIndicator {
+      max-width: 350px;
+      box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    }
+
+    /* Improved table styles */
+    .table-hover tbody tr:hover {
+      background-color: rgba(0, 0, 0, 0.025);
+    }
+
+    /* Modal improvements */
+    .modal-xl {
+      max-width: 95%;
+    }
+
+    /* Dropdown menu improvements */
+    .dropdown-menu {
+      box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+      border: 1px solid #dee2e6;
+    }
+
+    .dropdown-item:focus,
+    .dropdown-item:hover {
+      background-color: #f8f9fa;
+    }
+
+    /* Print styles */
+    @media print {
+      .breadcrumb-container,
+      .page-actions,
+      .btn,
+      .dropdown,
+      .alert.position-fixed {
+        display: none !important;
+      }
+
+      .page-header {
+        margin-bottom: 1rem;
+      }
+
+      .context-nav {
+        border: none;
+        box-shadow: none;
+        padding: 0.5rem 0;
+      }
+    }
   </style>
+
+  {% block extra_css %}{% endblock %}
 </head>
 
 <body class="bg-light">
@@ -183,6 +306,7 @@
                class="btn {{ action.class or 'btn-outline-primary' }}"
                {% if action.data_bs_toggle %}data-bs-toggle="{{ action.data_bs_toggle }}"{% endif %}
                {% if action.data_bs_target %}data-bs-target="{{ action.data_bs_target }}"{% endif %}
+               {% if action.target %}target="{{ action.target }}"{% endif %}
                title="{{ action.name }}">
               {% if action.icon %}<i class="bi bi-{{ action.icon }} me-1"></i>{% endif %}
               {{ action.name }}
@@ -229,328 +353,49 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"
           crossorigin="anonymous"></script>
 
-  <!-- ===== WSPÓLNE NARZĘDZIA SCHOWKA ===== -->
+  <!-- ===== NOWY SYSTEM JAVASCRIPT ===== -->
+
+  <!-- Core libraries - ładowane zawsze -->
+  <script src="{{ url_for('static', path='js/core/clipboard.js') }}"></script>
+  <script src="{{ url_for('static', path='js/core/alerts.js') }}"></script>
+  <script src="{{ url_for('static', path='js/core/modals.js') }}"></script>
+  <script src="{{ url_for('static', path='js/core/api-client.js') }}"></script>
+
+  <!-- Components - ładowane warunkowo -->
+  {% if page_type in ['document_detail', 'pdf_viewer', 'image_viewer', 'ocr_viewer', 'opinion_detail'] %}
+  <script src="{{ url_for('static', path='js/components/ocr-viewer.js') }}"></script>
+  <script src="{{ url_for('static', path='js/components/text-editor.js') }}"></script>
+  {% endif %}
+
+  <!-- POPRAWKA: Dodano 'document_detail' do warunków ładowania document-preview.js -->
+  {% if page_type in ['document_detail', 'document_preview', 'quick_preview', 'word_preview'] %}
+  <script src="{{ url_for('static', path='js/components/document-preview.js') }}"></script>
+  {% endif %}
+
+  <!-- PDF.js dla PDF viewer -->
+  {% if page_type in ['pdf_viewer', 'pdf_preview'] %}
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.min.js"></script>
   <script>
-  /**
-   * Kopiuje tekst do schowka (Clipboard API + fallback).
-   * @param {string} text - Tekst do skopiowania
-   * @param {Function} [callback] - Opcjonalna funkcja callback wykonywana po udanym kopiowaniu
-   * @returns {Promise<void>}
-   */
-  window.copyTextToClipboard = async function (text, callback) {
-    if (!text || !text.trim()) {
-      throw new Error('Brak tekstu do skopiowania');
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.worker.min.js';
     }
-    
-    console.log('copyTextToClipboard - rozpoczęcie kopiowania, długość tekstu:', text.length);
-    console.log('Dostępność Clipboard API:', !!navigator.clipboard?.writeText);
-    console.log('Protokół:', window.location.protocol);
-    console.log('Context jest bezpieczny:', window.isSecureContext);
-
-    try {
-      // Najpierw spróbuj nowoczesny Clipboard API
-      if (navigator.clipboard?.writeText && window.isSecureContext) {
-        console.log('Próba kopiowania przez Clipboard API...');
-        await navigator.clipboard.writeText(text);
-        console.log('Clipboard API - sukces');
-
-        // Sprawdź czy rzeczywiście skopiowano
-        try {
-          const clipboardContent = await navigator.clipboard.readText();
-          if (clipboardContent === text) {
-            console.log('Weryfikacja: tekst rzeczywiście w schowku');
-          } else {
-            console.warn('Weryfikacja: tekst w schowku różni się od oczekiwanego');
-          }
-        } catch (readError) {
-          console.warn('Nie można odczytać schowka dla weryfikacji:', readError.message);
-        }
-
-      } else {
-        console.log('Clipboard API niedostępne, używam fallback...');
-        // Fallback dla starszych przeglądarek lub niezabezpieczonych kontekstów
-        const success = await fallbackCopyToClipboard(text);
-        if (!success) {
-          throw new Error('Fallback method failed');
-        }
-        console.log('Fallback method - sukces');
-      }
-
-      // Jeśli podano callback, wywołaj go
-      if (typeof callback === 'function') {
-        callback();
-      }
-
-    } catch (err) {
-      console.error('Wszystkie metody kopiowania zawiodły:', err);
-      throw new Error('Nie udało się skopiować tekstu do schowka: ' + err.message);
-    }
-  };
-
-  /**
-   * Fallback metoda kopiowania dla starszych przeglądarek
-   * @param {string} text
-   * @returns {Promise<boolean>}
-   */
-  async function fallbackCopyToClipboard(text) {
-    console.log('Rozpoczęcie fallback copy method...');
-
-    return new Promise((resolve) => {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.left = '-9999px';
-      ta.style.top = '0';
-      ta.style.opacity = '0';
-      ta.style.pointerEvents = 'none';
-      ta.style.zIndex = '-1';
-
-      document.body.appendChild(ta);
-
-      try {
-        ta.focus();
-        ta.select();
-        ta.setSelectionRange(0, text.length);
-
-        console.log('Textarea utworzona i zaznaczona, próba execCommand...');
-
-        const successful = document.execCommand('copy');
-        console.log('execCommand result:', successful);
-
-        document.body.removeChild(ta);
-
-        if (successful) {
-          console.log('execCommand - sukces');
-          resolve(true);
-        } else {
-          console.error('execCommand - niepowodzenie');
-          resolve(false);
-        }
-
-      } catch (error) {
-        console.error('Błąd w fallback method:', error);
-        document.body.removeChild(ta);
-        resolve(false);
-      }
-    });
-  }
-
-  /**
-   * Alternatywna metoda kopiowania specjalnie dla modali
-   * @param {string} text
-   * @returns {Promise<boolean>}
-   */
-  async function aggressiveCopyToClipboard(text) {
-    console.log('Aggressywna metoda kopiowania...');
-
-    // Metoda 1: Spróbuj z fokusem na body
-    try {
-      document.body.focus();
-      if (navigator.clipboard?.writeText && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        console.log('Agresywna metoda 1 (Clipboard API) - sukces');
-        return true;
-      }
-    } catch (e) {
-      console.log('Agresywna metoda 1 nie powiodła się:', e.message);
-    }
-
-    // Metoda 2: Użyj textarea z focusem na dokumencie
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'absolute';
-      ta.style.left = '0';
-      ta.style.top = '0';
-      ta.style.width = '1px';
-      ta.style.height = '1px';
-      ta.style.padding = '0';
-      ta.style.border = 'none';
-      ta.style.outline = 'none';
-      ta.style.boxShadow = 'none';
-      ta.style.background = 'transparent';
-      ta.style.zIndex = '9999';
-
-      // Dodaj do body, nie do modala
-      document.body.appendChild(ta);
-
-      // Spróbuj różne metody fokusowania
-      ta.focus({ preventScroll: true });
-      ta.select();
-
-      // Dodatkowe zaznaczenie
-      if (ta.setSelectionRange) {
-        ta.setSelectionRange(0, text.length);
-      }
-
-      // Krótka pauza przed execCommand
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      const successful = document.execCommand('copy');
-      console.log('Agresywna metoda 2 (execCommand) - wynik:', successful);
-
-      document.body.removeChild(ta);
-
-      if (successful) {
-        return true;
-      }
-    } catch (e) {
-      console.log('Agresywna metoda 2 nie powiodła się:', e.message);
-    }
-
-    // Metoda 3: Użyj selection API
-    try {
-      const range = document.createRange();
-      const selection = window.getSelection();
-
-      const span = document.createElement('span');
-      span.textContent = text;
-      span.style.position = 'absolute';
-      span.style.left = '-9999px';
-      document.body.appendChild(span);
-
-      range.selectNode(span);
-      selection.removeAllRanges();
-      selection.addRange(range);
-
-      const successful = document.execCommand('copy');
-      console.log('Agresywna metoda 3 (Selection API) - wynik:', successful);
-
-      selection.removeAllRanges();
-      document.body.removeChild(span);
-
-      if (successful) {
-        return true;
-      }
-    } catch (e) {
-      console.log('Agresywna metoda 3 nie powiodła się:', e.message);
-    }
-
-    return false;
-  }
-
-  /**
-   * Ulepszona funkcja kopiowania z wieloma fallbackami
-   * @param {string} text
-   * @param {Function} callback
-   */
-  window.copyTextToClipboardAggressive = async function(text, callback) {
-    if (!text || !text.trim()) {
-      throw new Error('Brak tekstu do skopiowania');
-    }
-
-    console.log('copyTextToClipboardAggressive - rozpoczęcie...');
-
-    try {
-      // Najpierw standardowa metoda
-      await window.copyTextToClipboard(text);
-      console.log('Standardowa metoda zadziałała');
-
-      if (typeof callback === 'function') {
-        callback();
-      }
-      return;
-    } catch (standardError) {
-      console.log('Standardowa metoda nie powiodła się, próbuję agresywnej...', standardError.message);
-    }
-
-    // Jeśli standardowa nie zadziałała, użyj agresywnej
-    try {
-      const success = await aggressiveCopyToClipboard(text);
-      if (success) {
-        console.log('Agresywna metoda zadziałała');
-        if (typeof callback === 'function') {
-          callback();
-        }
-        return;
-      }
-    } catch (aggressiveError) {
-      console.log('Agresywna metoda nie powiodła się:', aggressiveError.message);
-    }
-
-    throw new Error('Wszystkie metody kopiowania zawiodły');
-  };
-
-  /**
-   * Krótkie „potwierdzenie" na przycisku (zamiana ikony/klasy na 2 s).
-   * @param {HTMLElement} btn
-   */
-  window.flashCopied = function (btn) {
-    const prev = btn.innerHTML;
-    const prevClasses = Array.from(btn.classList);
-
-    btn.innerHTML = '<i class="bi bi-check2"></i> Skopiowano!';
-    btn.classList.remove('btn-outline-secondary', 'btn-outline-primary');
-    btn.classList.add('btn-success');
-
-    setTimeout(() => {
-      btn.innerHTML = prev;
-      btn.className = ''; // Wyczyść wszystkie klasy
-      prevClasses.forEach(cls => btn.classList.add(cls)); // Przywróć oryginalne klasy
-    }, 2000);
-  };
-
-  /**
-   * Obsługa globalna – każdy element z data-copy-target kopiuje wskazany selektor.
-   */
-  document.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-copy-target]');
-    if (!btn) return;
-
-    console.log('Globalny handler kopiowania - kliknięcie na przycisk z data-copy-target');
-
-    const targetSel = btn.getAttribute('data-copy-target');
-    console.log('Cel do skopiowania:', targetSel);
-
-    const targetEl = document.querySelector(targetSel);
-    if (!targetEl) {
-      console.warn('Nie znaleziono elementu do skopiowania:', targetSel);
-      alert('Błąd: nie można znaleźć elementu do skopiowania');
-      return;
-    }
-
-    try {
-      const textToCopy = targetEl.innerText || targetEl.textContent || '';
-      console.log('Tekst do skopiowania (pierwsze 50 znaków):', textToCopy.substring(0, 50));
-
-      if (!textToCopy.trim()) {
-        console.warn('Brak tekstu do skopiowania');
-        alert('Brak tekstu do skopiowania');
-        return;
-      }
-
-      await window.copyTextToClipboard(textToCopy);
-      window.flashCopied(btn);
-      console.log('Globalne kopiowanie zakończone pomyślnie');
-    } catch (error) {
-      console.error('Błąd globalnego kopiowania:', error);
-      alert('Nie udało się skopiować tekstu do schowka: ' + error.message);
-    }
-  });
-
-  /**
-   * Pomocnicza funkcja dla kompatybilności wstecznej
-   * @param {string} text
-   * @param {Function} successCallback
-   * @param {Function} errorCallback
-   */
-  window.copyToClipboard = async function(text, successCallback, errorCallback) {
-    try {
-      await window.copyTextToClipboard(text);
-      if (typeof successCallback === 'function') {
-        successCallback();
-      }
-    } catch (error) {
-      if (typeof errorCallback === 'function') {
-        errorCallback(error);
-      } else {
-        console.error('Błąd kopiowania:', error);
-      }
-    }
-  };
   </script>
+  {% endif %}
 
-  <!-- Klikalny wiersz tabeli -->
+  <!-- Page-specific JavaScript -->
+  {% if page_type == 'opinion_detail' %}
+  <script src="{{ url_for('static', path='js/pages/opinion-detail.js') }}"></script>
+  {% elif page_type == 'document_detail' %}
+  <script src="{{ url_for('static', path='js/pages/document-detail.js') }}"></script>
+  {% elif page_type == 'documents_list' %}
+  <script src="{{ url_for('static', path='js/pages/document-list.js') }}"></script>
+  {% elif page_type == 'pdf_viewer' %}
+  <script src="{{ url_for('static', path='js/pages/pdf-viewer.js') }}"></script>
+  {% elif page_type == 'image_viewer' %}
+  <script src="{{ url_for('static', path='js/pages/image-viewer.js') }}"></script>
+  {% endif %}
+
+  <!-- Klikalny wiersz tabeli - legacy support -->
   <script>
   document.querySelectorAll('tr[data-href]').forEach(row => {
     row.addEventListener('click', function(e) {
@@ -560,6 +405,77 @@
       }
       window.location = row.dataset.href;
     });
+  });
+  </script>
+
+  <!-- Inicjalizacja globalnych komponentów -->
+  <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // Sprawdź czy core komponenty są załadowane
+    const coreComponentsLoaded = {
+      clipboardManager: !!window.clipboardManager,
+      alertManager: !!window.alertManager,
+      modalManager: !!window.modalManager,
+      apiClient: !!window.apiClient
+    };
+
+    // Jeśli jakiś core komponent nie jest załadowany, spróbuj inicjalizować globalny fallback
+    if (!window.clipboardManager && typeof ClipboardManager !== 'undefined') {
+      console.warn('clipboardManager nie był zainicjalizowany, tworzę backup...');
+      window.clipboardManager = new ClipboardManager();
+    }
+
+    // Inicjalizuj tooltips Bootstrap
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+
+    // Inicjalizuj popovers Bootstrap
+    const popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
+    popoverTriggerList.map(function (popoverTriggerEl) {
+      return new bootstrap.Popover(popoverTriggerEl);
+    });
+
+    // Global error handler
+    window.addEventListener('error', function(e) {
+      console.error('Global error:', e.error);
+      if (window.alertManager) {
+        window.alertManager.error('Wystąpił nieoczekiwany błąd aplikacji');
+      }
+    });
+
+    // Global unhandled promise rejection handler
+    window.addEventListener('unhandledrejection', function(e) {
+      console.error('Unhandled promise rejection:', e.reason);
+      if (window.alertManager) {
+        window.alertManager.error('Wystąpił błąd podczas przetwarzania żądania');
+      }
+    });
+
+    // Debug info
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '192.168.1.218') {
+      console.log('Court Workflow - Loaded components:', {
+        clipboardManager: !!window.clipboardManager,
+        alertManager: !!window.alertManager,
+        modalManager: !!window.modalManager,
+        apiClient: !!window.apiClient,
+        DocumentPreview: !!window.DocumentPreview,
+        DocumentDetailManager: !!window.DocumentDetailManager,
+        pageType: '{{ page_type or "unknown" }}'
+      });
+
+      // Sprawdź czy są błędy ładowania
+      const missingComponents = [];
+      if (!window.clipboardManager) missingComponents.push('clipboardManager');
+      if (!window.alertManager) missingComponents.push('alertManager');
+      if (!window.modalManager) missingComponents.push('modalManager');
+      if (!window.apiClient) missingComponents.push('apiClient');
+
+      if (missingComponents.length > 0) {
+        console.warn('Brakujące komponenty core:', missingComponents);
+      }
+    }
   });
   </script>
 

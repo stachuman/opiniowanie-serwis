@@ -1,15 +1,10 @@
-<!-- templates/document_history.html - POPRAWIONA WERSJA -->
+<!-- templates/document_history.html - REFAKTORYZOWANA -->
 {% extends 'base.html' %}
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h2>Historia dokumentu</h2>
-  <div>
-    <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="btn btn-outline-secondary">
-      <i class="bi bi-arrow-left"></i> Powrót do dokumentu
-    </a>
-  </div>
-</div>
 
+{% set page_type = 'document_detail' %}
+{% set page_title = 'Historia dokumentu' %}
+
+{% block content %}
 <div class="card mb-4">
   <div class="card-header">
     <h5 class="card-title mb-0">
@@ -122,9 +117,13 @@
                   <i class="bi bi-download"></i> Pobierz
                 </a>
                 <button type="button"
-                        class="btn btn-sm btn-outline-info"
-                        data-bs-toggle="modal"
-                        data-bs-target="#compareModal{{ loop.index }}"
+                        class="btn btn-sm btn-outline-info show-version-info-btn"
+                        data-version="{{ loop.index }}"
+                        data-doc-id="{{ history_doc.id }}"
+                        data-filename="{{ history_doc.original_filename }}"
+                        data-date="{{ history_doc.upload_time.strftime('%Y-%m-%d %H:%M') }}"
+                        data-mime="{{ history_doc.mime_type or 'Nieznany' }}"
+                        data-comments="{{ history_doc.comments or '' }}"
                         title="Porównaj z aktualną wersją">
                   <i class="bi bi-arrows-angle-expand"></i>
                 </button>
@@ -137,60 +136,6 @@
     </div>
   </div>
 </div>
-
-<!-- Modals dla porównania wersji -->
-{% for history_doc in history_docs %}
-<div class="modal fade" id="compareModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">
-          <i class="bi bi-arrows-angle-expand me-2"></i>
-          Informacje o wersji {{ loop.index }}
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="row">
-          <div class="col-md-6">
-            <h6>Wersja historyczna {{ loop.index }}</h6>
-            <ul class="list-unstyled">
-              <li><strong>Nazwa:</strong> {{ history_doc.original_filename }}</li>
-              <li><strong>Data:</strong> {{ history_doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</li>
-              <li><strong>Typ:</strong> {{ history_doc.mime_type or "Nieznany" }}</li>
-            </ul>
-          </div>
-          <div class="col-md-6">
-            <h6>Aktualna wersja</h6>
-            <ul class="list-unstyled">
-              <li><strong>Nazwa:</strong> {{ doc.original_filename }}</li>
-              <li><strong>Data:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') if doc.last_modified else doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</li>
-              <li><strong>Typ:</strong> {{ doc.mime_type or "Nieznany" }}</li>
-            </ul>
-          </div>
-        </div>
-
-        {% if history_doc.comments %}
-        <div class="mt-3">
-          <h6>Komentarze do wersji {{ loop.index }}:</h6>
-          <div class="card bg-light">
-            <div class="card-body">
-              <pre class="mb-0" style="white-space: pre-wrap; font-family: inherit;">{{ history_doc.comments }}</pre>
-            </div>
-          </div>
-        </div>
-        {% endif %}
-      </div>
-      <div class="modal-footer">
-        <a href="{{ url_for('document_download', doc_id=history_doc.id) }}" class="btn btn-primary">
-          <i class="bi bi-download"></i> Pobierz wersję {{ loop.index }}
-        </a>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Zamknij</button>
-      </div>
-    </div>
-  </div>
-</div>
-{% endfor %}
 
 {% else %}
 <div class="card">
@@ -211,4 +156,81 @@
   </div>
 </div>
 {% endif %}
+
+<script>
+// Inicjalizacja managera dokumentu po załadowaniu DOM
+document.addEventListener('DOMContentLoaded', function() {
+  // Inicjalizuj manager dokumentu
+  window.documentDetailManager = new DocumentDetailManager('{{ doc.id }}', {
+    hasOcr: {{ 'true' if doc.ocr_status == 'done' else 'false' }},
+    ocrStatus: '{{ doc.ocr_status or "none" }}'
+  });
+
+  // Obsługa przycisków informacji o wersji
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.show-version-info-btn');
+    if (!btn) return;
+
+    const version = btn.getAttribute('data-version');
+    const docId = btn.getAttribute('data-doc-id');
+    const filename = btn.getAttribute('data-filename');
+    const date = btn.getAttribute('data-date');
+    const mime = btn.getAttribute('data-mime');
+    const comments = btn.getAttribute('data-comments');
+
+    const modalTitle = `<i class="bi bi-arrows-angle-expand me-2"></i>Informacje o wersji ${version}`;
+    const modalBody = `
+      <div class="row">
+        <div class="col-md-6">
+          <h6>Wersja historyczna ${version}</h6>
+          <ul class="list-unstyled">
+            <li><strong>Nazwa:</strong> ${filename}</li>
+            <li><strong>Data:</strong> ${date}</li>
+            <li><strong>Typ:</strong> ${mime}</li>
+          </ul>
+        </div>
+        <div class="col-md-6">
+          <h6>Aktualna wersja</h6>
+          <ul class="list-unstyled">
+            <li><strong>Nazwa:</strong> {{ doc.original_filename }}</li>
+            <li><strong>Data:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') if doc.last_modified else doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</li>
+            <li><strong>Typ:</strong> {{ doc.mime_type or "Nieznany" }}</li>
+          </ul>
+        </div>
+      </div>
+      ${comments ? `
+        <div class="mt-3">
+          <h6>Komentarze do wersji ${version}:</h6>
+          <div class="card bg-light">
+            <div class="card-body">
+              <pre class="mb-0" style="white-space: pre-wrap; font-family: inherit;">${comments}</pre>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+    `;
+
+    const modal = window.modalManager.create(`versionInfoModal_${version}`, {
+      title: modalTitle,
+      body: modalBody,
+      size: 'lg',
+      autoDestroy: true,
+      buttons: [
+        {
+          text: `<i class="bi bi-download"></i> Pobierz wersję ${version}`,
+          class: 'btn-primary',
+          onclick: `window.location.href = '/document/${docId}/download'`
+        },
+        {
+          text: 'Zamknij',
+          class: 'btn-secondary',
+          dismiss: true
+        }
+      ]
+    });
+
+    modal.show();
+  });
+});
+</script>
 {% endblock %}

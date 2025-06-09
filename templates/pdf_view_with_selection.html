@@ -1,43 +1,25 @@
 {% extends 'base.html' %}
+
+{# Ustawienia dla base.html #}
+{% set page_type = 'pdf_viewer' %}
+{% set page_title = 'Podgląd PDF z zaznaczaniem' %}
+{% set page_actions = [
+  {
+    'name': 'Powrót do dokumentu',
+    'url': url_for('document_detail', doc_id=doc.id),
+    'icon': 'arrow-left',
+    'class': 'btn-outline-secondary'
+  },
+  {
+    'name': 'Pobierz PDF',
+    'url': url_for('document_download', doc_id=doc.id),
+    'icon': 'download',
+    'class': 'btn-outline-primary'
+  }
+] %}
+
 {% block content %}
-
-<div class="container-fluid">
-  <div class="row">
-    <div class="col-12">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2>Podgląd PDF z zaznaczaniem</h2>
-        <div>
-          <!--
-          {% if doc.parent_id %}
-          -- Gdy dokument ma rodzica (jest częścią opinii), wróć do widoku opinii
-          <a href="{{ url_for('opinion_detail', doc_id=doc.parent_id) }}" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left"></i> Powrót do opinii
-          </a>
-          {% else %}
-          -- Gdy dokument nie ma rodzica (jest samodzielny), wróć do widoku dokumentu 
-          <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left"></i> Powrót do dokumentu
-          </a>
-          {% endif %}
-
-          <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-outline-primary">
-            <i class="bi bi-download"></i> Pobierz PDF
-          </a>
-          -->
-
-          <!-- Przycisk uruchamiania OCR -->
-          {% if doc.ocr_status != 'running' %}
-          <form action="{{ url_for('document_run_ocr', doc_id=doc.id) }}" method="post" class="d-inline">
-            <button type="submit" class="btn btn-outline-warning">
-              <i class="bi bi-magic"></i> Uruchom pełne OCR
-            </button>
-          </form>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-  </div>
-
+<div id="ocrViewerContainer" class="container-fluid">
   <div class="row">
     <!-- Kolumna z podglądem PDF -->
     <div class="col-lg-8">
@@ -55,21 +37,23 @@
           </div>
         </div>
         <div class="card-body p-0 position-relative">
-          <div id="pdfContainer" style="height: 800px; position: relative; overflow: hidden;">
-            <canvas id="pdfCanvas" style="width: 100%; height: 100%;"></canvas>
-            <div id="selectionOverlay" style="position: absolute; top: 0; left: 0; border: 2px dashed #007bff; background-color: rgba(0, 123, 255, 0.2); display: none; pointer-events: none;"></div>
-          </div>
-
-          <!-- Loader dla procesu OCR -->
-          <div id="ocrLoader" class="position-absolute top-0 start-0 w-100 h-100 d-none"
-               style="background: rgba(255,255,255,0.8); z-index: 100; display: flex; align-items: center; justify-content: center;">
-            <div class="text-center">
-              <div class="spinner-border text-primary mb-2" role="status">
-                <span class="visually-hidden">Ładowanie...</span>
-              </div>
-              <div>Rozpoznawanie tekstu fragmentu...</div>
+          <!-- OCR Viewer Container -->
+            <div id="pdfContainer" style="height: 800px; position: relative; overflow: hidden;">
+              <canvas id="pdfCanvas" style="width: 100%; height: 100%;"></canvas>
+              <div id="selectionOverlay" class="ocr-selection-overlay" style="display: none;"></div>
             </div>
-          </div>
+
+            <!-- Loader dla procesu OCR -->
+            <div id="ocrLoader" class="position-absolute top-0 start-0 w-100 h-100 d-none"
+                 style="background: rgba(255,255,255,0.8); z-index: 100; display: flex; align-items: center; justify-content: center;">
+              <div class="text-center">
+                <div class="spinner-border text-primary mb-2" role="status">
+                  <span class="visually-hidden">Ładowanie...</span>
+                </div>
+                <div>Rozpoznawanie tekstu fragmentu...</div>
+              </div>
+            </div>
+
         </div>
       </div>
     </div>
@@ -80,42 +64,45 @@
         <div class="card-header">
           <div class="d-flex justify-content-between align-items-center">
             <h5 class="mb-0">Rozpoznany tekst</h5>
-            <button type="button" class="btn btn-sm btn-outline-info" id="toggleEditMode">
+            <button type="button" class="btn btn-sm btn-outline-info toggle-edit-btn" id="toggleEditMode">
               <i class="bi bi-pencil"></i> Edytuj
             </button>
           </div>
         </div>
         <div class="card-body">
-          <!-- Sekcja dla pełnego tekstu strony -->
-          <div id="fullPageSection">
+          <!-- Text Editor Container -->
+          <div id="textEditorContainer">
             <div class="d-flex justify-content-between mb-2">
               <h6 class="mb-0">Pełny tekst strony</h6>
               <div class="btn-group">
-                <button id="saveChangesBtn" class="btn btn-sm btn-outline-success d-none" onclick="saveCurrentText()">
+                <button id="saveChangesBtn" class="btn btn-sm btn-outline-success save-changes-btn d-none">
                   <i class="bi bi-save"></i> Zapisz zmiany
                 </button>
-                <button id="copyFullBtn" class="btn btn-sm btn-outline-secondary" data-copy-target="#textDisplay">
+                <button id="copyFullBtn" class="btn btn-sm btn-outline-secondary copy-text-btn" data-copy-target="#textDisplay">
                   <i class="bi bi-clipboard"></i> Kopiuj całość
                 </button>
               </div>
             </div>
 
-            <!-- Wyświetlacz tekstu (tylko do odczytu) -->
-            <div id="textDisplay" class="border rounded p-2" style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; background-color: #f8f9fa; cursor: text; min-height: 100px;"></div>
+            <!-- Text Display/Edit Area -->
+            <div id="textDisplay" class="text-display border rounded p-2"
+                 style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; background-color: #f8f9fa; cursor: text; min-height: 100px;">
+            </div>
 
-            <!-- Edytor tekstu (ukryty domyślnie) -->
-            <div id="textEditor" class="d-none">
-              <textarea id="textEditArea" class="form-control" rows="20" style="font-family: 'Courier New', monospace; resize: vertical; min-height: 300px;"></textarea>
+            <!-- Hidden Text Editor -->
+            <div id="textEditor" class="text-editor d-none">
+              <textarea id="textEditArea" class="form-control" rows="20"
+                        style="font-family: 'Courier New', monospace; resize: vertical; min-height: 300px;"></textarea>
               <div class="mt-2 d-flex justify-content-between">
                 <div class="text-muted small">
                   <i class="bi bi-info-circle me-1"></i>
                   Możesz edytować tekst aby poprawić błędy OCR przed zapisaniem.
                 </div>
                 <div>
-                  <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="cancelEdit()">
+                  <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="ocrViewer.cancelEdit()">
                     <i class="bi bi-x"></i> Anuluj
                   </button>
-                  <button type="button" class="btn btn-sm btn-success" onclick="saveEdit()">
+                  <button type="button" class="btn btn-sm btn-success" onclick="ocrViewer.saveEdit()">
                     <i class="bi bi-check"></i> Zatwierdź zmiany
                   </button>
                 </div>
@@ -150,10 +137,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <!--button id="copyFragmentBtn" type="button" class="btn btn-outline-secondary" data-copy-target="#fragmentTextContent">
-          <i class="bi bi-clipboard"></i> Kopiuj tekst
-        button -->
-        <button type="button" class="btn btn-primary" onclick="addToFullText()">
+        <button type="button" class="btn btn-primary" onclick="ocrViewer.addToFullText(document.getElementById('fragmentTextContent').textContent)">
           <i class="bi bi-plus-circle"></i> Dodaj do pełnego tekstu
         </button>
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Zamknij</button>
@@ -161,1048 +145,78 @@
     </div>
   </div>
 </div>
-
 {% endblock %}
 
 {% block scripts %}
-<!-- Dodaj PDF.js -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.min.js"></script>
 <script>
-  document.addEventListener('DOMContentLoaded', function() {
-    // Inicjalizacja PDF.js
-    const pdfjsLib = window['pdfjs-dist/build/pdf'];
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.worker.min.js';
-
-    // Elementy DOM
-    const pdfContainer = document.getElementById('pdfContainer');
-    const canvas = document.getElementById('pdfCanvas');
-    const ctx = canvas.getContext('2d');
-    const prevPageBtn = document.getElementById('prevPage');
-    const nextPageBtn = document.getElementById('nextPage');
-    const pageInfo = document.getElementById('pageInfo');
-    const selectionOverlay = document.getElementById('selectionOverlay');
-    const ocrLoader = document.getElementById('ocrLoader');
-
-    // Zmienne pomocnicze
-    let pdfDoc = null;
-    let pageNum = 1;
-    let pageRendering = false;
-    let pageNumPending = null;
-    let scale = 1.5;
-    let isSelecting = false;
-    let startX, startY, endX, endY;
-    let currentPdfUrl = '{{ url_for("document_preview", doc_id=doc.id) }}';
-    let docId = {{ doc.id }};
-    let ocrText = {};
-    let currentFullPageOcr = null;
-    let documentHasFullOcr = {{ 'true' if doc.ocr_status == 'done' else 'false' }};
-
-    // Ważne - przechowujemy aktualny viewport strony do prawidłowego przeliczania współrzędnych
-    let currentViewport = null;
-
-    // Zmienne dla trybu edycji
-    let isEditMode = false;
-    let originalTextBeforeEdit = '';
-    let originalText = '';
-    let textChanged = false;
-
-    // Główny element do wyświetlania tekstu
-    let fullPageText = document.getElementById('textDisplay');
-
-    // Ładowanie dokumentu PDF
-    pdfjsLib.getDocument(currentPdfUrl).promise.then(function(pdf) {
-      pdfDoc = pdf;
-      pageInfo.textContent = `Strona ${pageNum} z ${pdfDoc.numPages}`;
-
-      // Renderuj pierwszą stronę
-      renderPage(pageNum);
-
-      // Pobierz OCR dla pierwszej strony, jeśli jest dostępny
-      if (documentHasFullOcr) {
-        fetchOcrText(pageNum);
-      } else {
-        setupInitialMessage();
-      }
-
-      // Ustaw monitorowanie zmian tekstu
-      setupTextChangeMonitoring();
-
-      // Upewnij się, że modal jest w prawidłowym stanie
-      restoreModalContent();
-
-      // Skonfiguruj przycisk kopiowania w modalu
-      setupModalCopyButton();
-    });
-
-    // Funkcja renderująca stronę
-    function renderPage(num) {
-      pageRendering = true;
-
-      // Pobierz stronę PDF
-      pdfDoc.getPage(num).then(function(page) {
-        // Dostosuj rozmiar kanwy do strony PDF
-        const viewport = page.getViewport({ scale: scale });
-        currentViewport = viewport; // Zapisz viewport do późniejszego użycia
-
-        // Oblicz prawidłowe wymiary Canvas dla uniknięcia zniekształceń
-        const parent = canvas.parentNode;
-        const parentWidth = parent.clientWidth;
-
-        // Zachowaj proporcje strony PDF
-        const ratio = viewport.width / viewport.height;
-
-        // Ustaw wymiary Canvas
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
-
-        // Renderuj stronę na kanwie
-        const renderContext = {
-          canvasContext: ctx,
-          viewport: viewport
-        };
-
-        page.render(renderContext).promise.then(function() {
-          pageRendering = false;
-
-          if (pageNumPending !== null) {
-            // Jeśli jest oczekująca strona, renderuj ją
-            renderPage(pageNumPending);
-            pageNumPending = null;
-          }
-        });
-
-        // Aktualizuj informacje o stronie
-        pageInfo.textContent = `Strona ${num} z ${pdfDoc.numPages}`;
-      });
-
-      // Pobierz OCR dla wybranej strony, jeśli dokument ma pełny OCR
-      if (documentHasFullOcr) {
-        fetchOcrText(num);
-      } else {
-        // Resetuj wyświetlanie tekstów
-        hideSelection();
-        setupInitialMessage();
-      }
-    }
-
-    // Funkcja pobierająca tekst OCR dla strony
-    function fetchOcrText(page) {
-      // Jeśli już mamy OCR dla tej strony, po prostu wyświetl go
-      if (ocrText[page]) {
-        updateDisplayText(ocrText[page]);
-        return;
-      }
-
-      fullPageText.innerHTML = `<div class="d-flex justify-content-center">
-        <div class="spinner-border text-secondary" role="status">
-          <span class="visually-hidden">Ładowanie...</span>
-        </div>
-      </div>`;
-
-      // Najpierw spróbuj zsynchronizować z serwerem
-      syncWithServer().then(hasServerText => {
-        if (!hasServerText) {
-          // Jeśli serwer nie ma tekstu, wykonaj OCR
-          performOcrForPage(page);
-        }
-      }).catch(() => {
-        // W przypadku błędu synchronizacji, wykonaj OCR
-        performOcrForPage(page);
-      });
-    }
-
-    // Wynieś logikę OCR do osobnej funkcji
-    function performOcrForPage(page) {
-      // Utwórz dane do wysłania
-      const data = {
-        page: page,
-        x1: 0, y1: 0, x2: 1, y2: 1  // Cała strona
-      };
-
-      // Wyślij zapytanie do API
-      fetch(`/api/document/${docId}/ocr-selection`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.success) {
-          // Zapisz OCR dla tej strony
-          ocrText[page] = data.text;
-          // Zapisz pełny tekst strony
-          currentFullPageOcr = data.text;
-          // Wyświetl OCR
-          updateDisplayText(data.text);
-        } else {
-          fullPageText.innerHTML = `<div class="alert alert-warning">
-            <i class="bi bi-exclamation-triangle-fill me-2"></i>
-            ${data.error || 'Nie udało się pobrać tekstu OCR'}
-          </div>`;
-        }
-      })
-      .catch(error => {
-        fullPageText.innerHTML = `<div class="alert alert-danger">
-          <i class="bi bi-exclamation-triangle-fill me-2"></i>
-          Błąd: ${error.message}
-        </div>`;
-      });
-    }
-
-    function setupInitialMessage() {
-      // Najpierw sprawdź czy jest tekst na serwerze
-      syncWithServer().then(hasServerText => {
-        if (!hasServerText) {
-          // Jeśli nie ma tekstu na serwerze, pokaż komunikat
-          fullPageText.innerHTML = `<div class="alert alert-secondary">
-            <i class="bi bi-info-circle-fill me-2"></i>
-            Brak pełnego OCR dla tego dokumentu. Zaznacz fragment tekstu na dokumencie,
-            aby rozpoznać wybrany obszar.
-          </div>`;
-        }
-      });
-    }
-
-    // Funkcja queueRenderPage zapewniająca, że tylko jedna strona jest renderowana naraz
-    function queueRenderPage(num) {
-      if (pageRendering) {
-        pageNumPending = num;
-      } else {
-        renderPage(num);
-      }
-    }
-
-    // Poprzednia strona
-    prevPageBtn.addEventListener('click', function() {
-      if (pageNum <= 1) {
-        return;
-      }
-      pageNum--;
-      queueRenderPage(pageNum);
-      // Ukryj zaznaczenie przy zmianie strony
-      hideSelection();
-    });
-
-    // Następna strona
-    nextPageBtn.addEventListener('click', function() {
-      if (pageNum >= pdfDoc.numPages) {
-        return;
-      }
-      pageNum++;
-      queueRenderPage(pageNum);
-      // Ukryj zaznaczenie przy zmianie strony
-      hideSelection();
-    });
-
-    // Funkcja do przeliczania współrzędnych z Canvas na współrzędne PDF
-    function calculatePdfCoordinates(clientX, clientY) {
-      if (!currentViewport) return {x: 0, y: 0};
-
-      const rect = canvas.getBoundingClientRect();
-
-      // Współczynniki skalowania - rzeczywiste wymiary canvas vs wyświetlane
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-
-      // Oblicz współrzędne kliknięcia względem canvas
-      const canvasX = (clientX - rect.left) * scaleX;
-      const canvasY = (clientY - rect.top) * scaleY;
-
-      // Zwróć znormalizowane współrzędne (0-1)
-      return {
-        x: canvasX / canvas.width,
-        y: canvasY / canvas.height
-      };
-    }
-
-    // Obsługa zaznaczania fragmentu
-    pdfContainer.addEventListener('mousedown', function(e) {
-      // Rozpocznij zaznaczanie
-      isSelecting = true;
-
-      // Pobierz pozycję kliknięcia względem kontenera z uwzględnieniem skalowania
-      const coords = calculatePdfCoordinates(e.clientX, e.clientY);
-      startX = coords.x * canvas.width;
-      startY = coords.y * canvas.height;
-
-      // Ukryj poprzednie zaznaczenie
-      hideSelection();
-    });
-
-    pdfContainer.addEventListener('mousemove', function(e) {
-      if (!isSelecting) return;
-
-      // Pobierz aktualną pozycję kursora z uwzględnieniem skalowania
-      const coords = calculatePdfCoordinates(e.clientX, e.clientY);
-      endX = coords.x * canvas.width;
-      endY = coords.y * canvas.height;
-
-      // Oblicz wymiary prostokąta zaznaczenia
-      const left = Math.min(startX, endX);
-      const top = Math.min(startY, endY);
-      const width = Math.abs(endX - startX);
-      const height = Math.abs(endY - startY);
-
-      // Pokaż zaznaczenie (stosując odpowiednie skalowanie do CSS)
-      const rect = canvas.getBoundingClientRect();
-      const cssScaleX = rect.width / canvas.width;
-      const cssScaleY = rect.height / canvas.height;
-
-      selectionOverlay.style.left = `${left * cssScaleX}px`;
-      selectionOverlay.style.top = `${top * cssScaleY}px`;
-      selectionOverlay.style.width = `${width * cssScaleX}px`;
-      selectionOverlay.style.height = `${height * cssScaleY}px`;
-      selectionOverlay.style.display = 'block';
-    });
-
-    pdfContainer.addEventListener('mouseup', function(e) {
-      if (!isSelecting) return;
-
-      // Zakończ zaznaczanie
-      isSelecting = false;
-
-      // Pobierz ostateczną pozycję kursora z uwzględnieniem skalowania
-      const coords = calculatePdfCoordinates(e.clientX, e.clientY);
-      endX = coords.x * canvas.width;
-      endY = coords.y * canvas.height;
-
-      // Jeśli zaznaczenie jest zbyt małe, ignoruj je
-      if (Math.abs(endX - startX) < 10 || Math.abs(endY - startY) < 10) {
-        hideSelection();
-        return;
-      }
-
-      // Oblicz współrzędne normalizowane (0-1)
-      const normX1 = Math.min(startX, endX) / canvas.width;
-      const normY1 = Math.min(startY, endY) / canvas.height;
-      const normX2 = Math.max(startX, endX) / canvas.width;
-      const normY2 = Math.max(startY, endY) / canvas.height;
-
-      console.log("Współrzędne zaznaczenia (0-1):", {
-        x1: normX1, y1: normY1, x2: normX2, y2: normY2
-      });
-
-      // Pobierz OCR dla zaznaczonego fragmentu
-      getSelectionOcr(normX1, normY1, normX2, normY2);
-    });
-
-    // Funkcja pobierająca OCR dla zaznaczonego fragmentu
-    function getSelectionOcr(x1, y1, x2, y2) {
-      // Pokaż loader
-      ocrLoader.classList.remove('d-none');
-
-      // Przygotuj dane do wysłania
-      const data = {
-        page: pageNum,
-        x1: x1,
-        y1: y1,
-        x2: x2,
-        y2: y2,
-        skip_pdf_embed: true // Nie osadzaj tekstu w PDF dla fragmentów
-      };
-
-      // Wyślij zapytanie do API
-      fetch(`/api/document/${docId}/ocr-selection`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-      })
-      .then(response => response.json())
-      .then(data => {
-        // Ukryj loader
-        ocrLoader.classList.add('d-none');
-
-        if (data.success) {
-          // Wyświetl wynik w modalu
-          showFragmentTextModal(data.text);
-        } else {
-          // Pokaż błąd w modalu
-          showFragmentTextModal(`Błąd: ${data.error || 'Nie udało się rozpoznać tekstu z fragmentu'}`);
-        }
-      })
-      .catch(error => {
-        // Ukryj loader
-        ocrLoader.classList.add('d-none');
-
-        // Pokaż błąd w modalu
-        showFragmentTextModal(`Błąd: ${error.message}`);
-      });
-    }
-
-    // Funkcja ukrywająca zaznaczenie
-    function hideSelection() {
-      selectionOverlay.style.display = 'none';
-    }
-
-    // Funkcja wyświetlająca modal z tekstem fragmentu
-    function showFragmentTextModal(text) {
-      const fragmentTextElement = document.getElementById('fragmentTextContent');
-      const modalElement = document.getElementById('fragmentTextModal');
-
-      // Jeśli element nie istnieje, spróbuj odtworzyć strukturę modala
-      if (!fragmentTextElement || !modalElement) {
-        console.warn('Elementy modala nie istnieją, próbuję odtworzyć...');
-        restoreModalContent();
-      }
-
-      // Sprawdź ponownie po próbie odtworzenia
-      const fragmentTextElementNew = document.getElementById('fragmentTextContent');
-      const modalElementNew = document.getElementById('fragmentTextModal');
-
-      if (!fragmentTextElementNew) {
-        console.error('Element fragmentTextContent nie został znaleziony nawet po odtworzeniu');
-        alert('Błąd interfejsu: nie można wyświetlić modala z tekstem');
-        return;
-      }
-
-      if (!modalElementNew) {
-        console.error('Element fragmentTextModal nie został znaleziony');
-        alert('Błąd interfejsu: nie można wyświetlić modala');
-        return;
-      }
-
-      fragmentTextElementNew.textContent = text;
-
-      // Ustaw dedykowany event listener dla przycisku kopiowania
-      setupModalCopyButton();
-
-      const modal = new bootstrap.Modal(modalElementNew);
-      modal.show();
-    }
-
-    // Funkcja konfigurująca przycisk kopiowania w modalu
-    function setupModalCopyButton() {
-      const copyBtn = document.getElementById('copyFragmentBtn');
-      if (!copyBtn) {
-        console.warn('Przycisk copyFragmentBtn nie został znaleziony');
-        return;
-      }
-
-      // Usuń wszystkie poprzednie event listenery jeśli istnieją
-      copyBtn.removeEventListener('click', handleModalCopyClick, { capture: true });
-      copyBtn.removeEventListener('click', handleModalCopyClick);
-      copyBtn.removeEventListener('click', handleModalCopyClickBackup);
-
-      // Dodaj nowe event listenery
-      copyBtn.addEventListener('click', handleModalCopyClick, { capture: true });
-      copyBtn.addEventListener('click', handleModalCopyClickBackup);
-
-      console.log('Skonfigurowano przyciski kopiowania dla modala');
-    }
-
-    // Handler dla kopiowania tekstu z modala
-    async function handleModalCopyClick(e) {
-      e.preventDefault();
-      e.stopPropagation();
-
-      console.log('Dedykowany handler modala - kopiowanie tekstu');
-
-      const btn = e.currentTarget;
-      const targetSelector = btn.getAttribute('data-copy-target');
-
-      if (!targetSelector) {
-        console.error('Brak atrybutu data-copy-target na przycisku');
-        alert('Błąd konfiguracji: nie można określić tekstu do skopiowania');
-        return;
-      }
-
-      const targetEl = document.querySelector(targetSelector);
-      if (!targetEl) {
-        console.error('Nie znaleziono elementu do skopiowania:', targetSelector);
-
-        // Spróbuj odtworzyć modal i spróbuj ponownie
-        restoreModalContent();
-        const targetElNew = document.querySelector(targetSelector);
-        if (!targetElNew) {
-          alert('Błąd: nie można znaleźć tekstu do skopiowania');
-          return;
-        }
-      }
-
-      try {
-        const textToCopy = (targetEl || document.querySelector(targetSelector)).innerText ||
-                          (targetEl || document.querySelector(targetSelector)).textContent || '';
-
-        if (!textToCopy.trim()) {
-          alert('Brak tekstu do skopiowania');
-          return;
-        }
-
-        console.log('Kopiowanie tekstu:', textToCopy.substring(0, 50) + '...');
-
-        // Użyj agresywnej metody kopiowania dla modali
-        await window.copyTextToClipboardAggressive(textToCopy, () => {
-          window.flashCopied(btn);
-        });
-
-        console.log('Tekst skopiowany pomyślnie (dedykowany handler)');
-
-      } catch (error) {
-        console.error('Błąd kopiowania tekstu z modala:', error);
-        alert('Nie udało się skopiować tekstu do schowka: ' + error.message);
-      }
-    }
-
-    // Backup handler - w przypadku gdyby główny nie zadziałał
-    async function handleModalCopyClickBackup(e) {
-      // Sprawdź czy główny handler już obsłużył to zdarzenie
-      if (e.defaultPrevented) {
-        console.log('Backup handler - zdarzenie już obsłużone');
-        return;
-      }
-
-      console.log('Backup handler - próba kopiowania');
-
-      // Daj chwilę głównemu handlerowi
-      setTimeout(async () => {
-        if (e.defaultPrevented) return;
-
-        console.log('Backup handler aktywny - kopiowanie tekstu');
-
-        const btn = e.currentTarget;
-        const targetSelector = btn.getAttribute('data-copy-target');
-        const targetEl = document.querySelector(targetSelector);
-
-        if (targetEl) {
-          try {
-            const textToCopy = targetEl.innerText || targetEl.textContent || '';
-            if (textToCopy.trim()) {
-              // Użyj agresywnej metody też w backup handlerze
-              await window.copyTextToClipboardAggressive(textToCopy, () => {
-                window.flashCopied(btn);
-              });
-              console.log('Backup handler - kopiowanie zakończone pomyślnie');
-            }
-          } catch (error) {
-            console.error('Backup handler - błąd:', error);
-          }
-        }
-      }, 100);
-    }
-
-    // Funkcja odtwarzająca oryginalną zawartość modala
-    function restoreModalContent() {
-      const modalElement = document.getElementById('fragmentTextModal');
-      if (!modalElement) return;
-
-      const modalBody = modalElement.querySelector('.modal-body');
-      if (!modalBody) return;
-
-      // Sprawdź czy element fragmentTextContent już istnieje
-      if (modalBody.querySelector('#fragmentTextContent')) {
-        // Już istnieje, tylko upewnij się że przycisk kopiowania działa
-        setupModalCopyButton();
-        return;
-      }
-
-      // Odtwórz oryginalną zawartość
-      modalBody.innerHTML = `
-        <div class="alert alert-info">
-          <i class="bi bi-info-circle me-2"></i>
-          <strong>Tekst rozpoznany z zaznaczonego fragmentu:</strong>
-        </div>
-        <div class="card bg-light">
-          <div class="card-body">
-            <pre id="fragmentTextContent" class="mb-0" style="white-space: pre-wrap; max-height: 400px; overflow-y: auto;"></pre>
-          </div>
-        </div>
-      `;
-
-      // Skonfiguruj przycisk kopiowania po odtworzeniu
-      setTimeout(() => setupModalCopyButton(), 100);
-    }
-
-    // Funkcja synchronizacji z serwerem przy ładowaniu strony
-    async function syncWithServer() {
-      try {
-        const response = await fetch(`/api/document/${docId}/ocr-text`);
-        const result = await response.json();
-
-        if (result.success && result.has_ocr) {
-          // Jeśli serwer ma tekst OCR, użyj go zamiast ponownego generowania
-          ocrText[pageNum] = result.text;
-          updateDisplayText(result.text);
-          currentFullPageOcr = result.text;
-
-          // Pokaż info o synchronizacji (tylko jeśli tekst był już wyświetlany)
-          if (fullPageText.textContent.trim()) {
-            showSyncInfo();
-          }
-
-          return true; // Oznacza że znaleziono tekst na serwerze
-        }
-        return false; // Brak tekstu na serwerze
-      } catch (error) {
-        console.warn('Nie udało się zsynchronizować z serwerem:', error);
-        return false;
-      }
-    }
-
-    // Funkcje do obsługi edycji tekstu
-    function toggleEditMode() {
-      const textDisplay = document.getElementById('textDisplay');
-      const textEditor = document.getElementById('textEditor');
-      const textEditArea = document.getElementById('textEditArea');
-      const toggleBtn = document.getElementById('toggleEditMode');
-
-      // Walidacja elementów
-      if (!textDisplay || !textEditor || !textEditArea || !toggleBtn) {
-        console.error('Nie można znaleźć elementów interfejsu edycji:', {
-          textDisplay: !!textDisplay,
-          textEditor: !!textEditor,
-          textEditArea: !!textEditArea,
-          toggleBtn: !!toggleBtn
-        });
-        alert('Błąd interfejsu: nie można przełączyć trybu edycji');
-        return;
-      }
-
-      if (!isEditMode) {
-        // Przejdź do trybu edycji
-        const currentText = textDisplay.textContent || '';
-        originalTextBeforeEdit = currentText;
-
-        textEditArea.value = currentText;
-        textDisplay.classList.add('d-none');
-        textEditor.classList.remove('d-none');
-
-        toggleBtn.innerHTML = '<i class="bi bi-eye"></i> Podgląd';
-        toggleBtn.classList.remove('btn-outline-info');
-        toggleBtn.classList.add('btn-outline-warning');
-
-        isEditMode = true;
-
-        // Focus na pole tekstowe
-        textEditArea.focus();
-
-      } else {
-        // Przejdź do trybu podglądu
-        exitEditMode(false); // false = nie zapisuj automatycznie
-      }
-    }
-
-    function exitEditMode(autoSave = false) {
-      const textDisplay = document.getElementById('textDisplay');
-      const textEditor = document.getElementById('textEditor');
-      const textEditArea = document.getElementById('textEditArea');
-      const toggleBtn = document.getElementById('toggleEditMode');
-
-      // Walidacja elementów
-      if (!textDisplay || !textEditor || !textEditArea || !toggleBtn) {
-        console.error('Nie można znaleźć elementów interfejsu edycji podczas wyjścia');
-        return;
-      }
-
-      if (autoSave) {
-        // Zaktualizuj wyświetlany tekst
-        const editedText = textEditArea.value;
-        updateDisplayText(editedText);
-      }
-
-      textDisplay.classList.remove('d-none');
-      textEditor.classList.add('d-none');
-
-      toggleBtn.innerHTML = '<i class="bi bi-pencil"></i> Edytuj';
-      toggleBtn.classList.remove('btn-outline-warning');
-      toggleBtn.classList.add('btn-outline-info');
-
-      isEditMode = false;
-    }
-
-    function updateDisplayText(text) {
-      const textDisplay = document.getElementById('textDisplay');
-
-      // Aktualizuj wyświetlacz
-      textDisplay.textContent = text;
-
-      // Ustaw oryginalny tekst dla monitorowania zmian
-      originalText = text;
-    }
-
-    // Obsługa zmiany rozmiaru okna
-    window.addEventListener('resize', function() {
-      // Ukryj zaznaczenie przy zmianie rozmiaru okna
-      hideSelection();
-    });
-
-    // Obsługa skrótów klawiszowych
-    document.addEventListener('keydown', function(e) {
-      if (isEditMode) {
-        // Ctrl+Enter = zapisz i wyjdź z edycji
-        if (e.ctrlKey && e.key === 'Enter') {
-          e.preventDefault();
-          saveEdit();
-        }
-        // Escape = anuluj edycję
-        else if (e.key === 'Escape') {
-          e.preventDefault();
-          cancelEdit();
-        }
-      } else {
-        // E = przejdź do edycji (gdy nie jesteś w polu input)
-        if (e.key === 'e' && !e.ctrlKey && !e.altKey &&
-            document.activeElement.tagName !== 'INPUT' &&
-            document.activeElement.tagName !== 'TEXTAREA') {
-          e.preventDefault();
-          toggleEditMode();
-        }
-      }
-    });
-
-    // Podłącz event listener do przycisku toggle
-    const toggleBtn = document.getElementById('toggleEditMode');
-    if (toggleBtn) {
-      toggleBtn.addEventListener('click', toggleEditMode);
-    } else {
-      console.warn('Przycisk toggleEditMode nie został znaleziony - nie można dodać event listenera');
-    }
-
-    // Ustaw monitorowanie zmian tekstu
-    function setupTextChangeMonitoring() {
-      const textDisplay = document.getElementById('textDisplay');
-
-      if (textDisplay) {
-        // Obserwuj zmiany w tekście (używaj MutationObserver dla textContent)
-        const observer = new MutationObserver(function(mutations) {
-          mutations.forEach(function(mutation) {
-            if (mutation.type === 'childList' || mutation.type === 'characterData') {
-              checkForTextChanges();
-            }
-          });
-        });
-
-        observer.observe(textDisplay, {
-          childList: true,
-          subtree: true,
-          characterData: true
-        });
-      }
-    }
-
-    function checkForTextChanges() {
-      const textDisplay = document.getElementById('textDisplay');
-      const currentText = textDisplay.textContent;
-      const saveBtn = document.getElementById('saveChangesBtn');
-
-      if (currentText !== originalText) {
-        if (!textChanged) {
-          textChanged = true;
-          saveBtn.classList.remove('d-none');
-          textDisplay.style.backgroundColor = '#fff3cd'; // Żółte tło
-          textDisplay.style.border = '2px solid #ffc107';
-        }
-      } else {
-        if (textChanged) {
-          textChanged = false;
-          saveBtn.classList.add('d-none');
-          textDisplay.style.backgroundColor = '#f8f9fa';
-          textDisplay.style.border = '';
-        }
-      }
-    }
-
-    // Globalne funkcje
-    window.cancelEdit = function() {
-      const textEditArea = document.getElementById('textEditArea');
-      if (!textEditArea) {
-        console.error('Element textEditArea nie został znaleziony');
-        alert('Błąd interfejsu: nie można anulować edycji');
-        return;
-      }
-
-      // Przywróć oryginalny tekst
-      textEditArea.value = originalTextBeforeEdit;
-      exitEditMode(false);
-    };
-
-    window.saveEdit = function() {
-      const textEditArea = document.getElementById('textEditArea');
-      if (!textEditArea) {
-        console.error('Element textEditArea nie został znaleziony');
-        alert('Błąd interfejsu: nie można zapisać edycji');
-        return;
-      }
-
-      const editedText = textEditArea.value;
-
-      // Sprawdź czy tekst się zmienił
-      if (editedText !== originalTextBeforeEdit) {
-        updateDisplayText(editedText);
-        checkForTextChanges(); // Pokaż przycisk "Zapisz zmiany"
-      }
-
-      exitEditMode(true);
-    };
-
-    // Zmodyfikowana funkcja saveCurrentText
-    window.saveCurrentText = async function() {
-      const textDisplay = document.getElementById('textDisplay');
-      const currentText = textDisplay.textContent;
-
-      try {
-        const formData = new FormData();
-        formData.append('text_content', currentText);
-
-        const response = await fetch(`/api/document/${docId}/update-ocr-text`, {
-          method: 'POST',
-          body: formData
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-          originalText = currentText;
-          textChanged = false;
-          document.getElementById('saveChangesBtn').classList.add('d-none');
-          textDisplay.style.backgroundColor = '#f8f9fa';
-          textDisplay.style.border = '';
-
-          showSuccessAlert('Zmiany zostały zapisane', 'success', result.ocr_doc_id);
-        } else {
-          showErrorAlert('Nie udało się zapisać zmian: ' + (result.error || 'Nieznany błąd'));
-        }
-
-      } catch (error) {
-        showErrorAlert('Błąd podczas zapisywania: ' + error.message);
-      }
-    };
-
-    // Ulepszona funkcja showSuccessAlert z linkami powrotu
-    function showSuccessAlert(message, type = 'success', ocrDocId = null) {
-      const alertClass = type === 'success' ? 'alert-success' : 'alert-info';
-      const iconClass = type === 'success' ? 'bi-check-circle' : 'bi-info-circle';
-
-      // Przygotuj linki powrotu
-      let returnLinks = '';
-      {% if doc.parent_id %}
-        // Dokument należy do opinii
-        returnLinks = `
-          <div class="mt-2">
-            <a href="{{ url_for('opinion_detail', doc_id=doc.parent_id) }}?ocr_updated=true&ocr_doc_id=${ocrDocId || ''}"
-               class="btn btn-sm btn-outline-dark me-2">
-              <i class="bi bi-arrow-left"></i> Powrót do opinii
-            </a>
-            <a href="{{ url_for('document_detail', doc_id=doc.id) }}?ocr_updated=true&ocr_doc_id=${ocrDocId || ''}"
-               class="btn btn-sm btn-outline-dark">
-              <i class="bi bi-file-earmark"></i> Widok dokumentu
-            </a>
-          </div>
-        `;
-      {% else %}
-        // Dokument samodzielny
-        returnLinks = `
-          <div class="mt-2">
-            <a href="{{ url_for('document_detail', doc_id=doc.id) }}?ocr_updated=true&ocr_doc_id=${ocrDocId || ''}"
-               class="btn btn-sm btn-outline-dark me-2">
-              <i class="bi bi-arrow-left"></i> Widok dokumentu
-            </a>
-            <a href="{{ url_for('list_documents') }}"
-               class="btn btn-sm btn-outline-dark">
-              <i class="bi bi-files"></i> Lista dokumentów
-            </a>
-          </div>
-        `;
-      {% endif %}
-
-      const alert = document.createElement('div');
-      alert.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
-      alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 350px; max-width: 450px;';
-      alert.innerHTML = `
-        <div class="d-flex align-items-start">
-          <i class="${iconClass} me-2 mt-1"></i>
-          <div class="flex-grow-1">
-            <div class="fw-bold">${message}</div>
-            <small class="text-muted">Tekst został zapisany na serwerze i będzie dostępny po powrocie do widoku dokumentu.</small>
-            ${returnLinks}
-          </div>
-          <button type="button" class="btn-close ms-2" data-bs-dismiss="alert"></button>
-        </div>
-      `;
-      document.body.appendChild(alert);
-
-      // Usuń po 10 sekundach (dłużej dla ważnych komunikatów)
-      setTimeout(() => {
-        if (alert.parentNode) {
-          alert.remove();
-        }
-      }, 10000);
-    }
-
-    function showErrorAlert(message) {
-      const alert = document.createElement('div');
-      alert.className = 'alert alert-danger alert-dismissible fade show position-fixed';
-      alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-      alert.innerHTML = `
-        <i class="bi bi-exclamation-triangle me-2"></i>${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-      `;
-      document.body.appendChild(alert);
-
-      // Usuń po 7 sekund (błędy trzymamy dłużej)
-      setTimeout(() => {
-        if (alert.parentNode) {
-          alert.remove();
-        }
-      }, 7000);
-    }
-
-    function showSyncInfo() {
-      const alert = document.createElement('div');
-      alert.className = 'alert alert-info alert-dismissible fade show position-fixed';
-      alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-      alert.innerHTML = `
-        <i class="bi bi-cloud-check me-2"></i>
-        <strong>Synchronizacja z serwerem</strong><br>
-        <small>Załadowano najnowszy tekst OCR z serwera.</small>
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-      `;
-      document.body.appendChild(alert);
-
-      setTimeout(() => {
-        if (alert.parentNode) {
-          alert.remove();
-        }
-      }, 4000);
-    }
-
-    // Zaktualizowana funkcja addToFullText
-    window.addToFullText = async function() {
-      const fragmentTextElement = document.getElementById('fragmentTextContent');
-      const modalElement = document.getElementById('fragmentTextModal');
-
-      if (!fragmentTextElement) {
-        console.error('Element fragmentTextContent nie został znaleziony');
-        // Spróbuj odtworzyć zawartość modala
-        restoreModalContent();
-        const fragmentTextElementNew = document.getElementById('fragmentTextContent');
-        if (!fragmentTextElementNew) {
-          alert('Błąd interfejsu: nie można pobrać tekstu fragmentu');
-          return;
-        }
-      }
-
-      if (!modalElement) {
-        console.error('Modal fragmentTextModal nie został znaleziony');
-        alert('Błąd interfejsu: nie można znaleźć modala');
-        return;
-      }
-
-      const fragmentText = (fragmentTextElement || document.getElementById('fragmentTextContent')).textContent;
-      const currentFullText = fullPageText.textContent;
-
-      // Przygotuj nowy tekst - dodaj fragment do istniejącego
-      let newFullText;
-      if (currentFullText && currentFullText.trim() && !currentFullText.includes('Brak pełnego OCR')) {
-        newFullText = currentFullText + '\n\n--- Dodany fragment ---\n' + fragmentText;
-      } else {
-        newFullText = fragmentText;
-      }
-
-      // Pobierz lub utwórz instancję modala
-      let modal = bootstrap.Modal.getInstance(modalElement);
-      if (!modal) {
-        modal = new bootstrap.Modal(modalElement);
-      }
-
-      const modalBody = modalElement.querySelector('.modal-body');
-      if (!modalBody) {
-        console.error('Nie można znaleźć .modal-body w modalu');
-        alert('Błąd interfejsu: nieprawidłowa struktura modala');
-        return;
-      }
-
-      const originalContent = modalBody.innerHTML;
-
-      // Funkcja przywracająca zawartość w każdym przypadku
-      const restoreContent = () => {
-        if (modalBody) {
-          modalBody.innerHTML = originalContent;
-          // Przywróć również funkcjonalność kopiowania
-          setTimeout(() => setupModalCopyButton(), 100);
-        }
-      };
-
-      // Dodaj event listener na zamknięcie modala aby przywrócić zawartość
-      const handleModalHidden = () => {
-        restoreContent();
-        modalElement.removeEventListener('hidden.bs.modal', handleModalHidden);
-      };
-      modalElement.addEventListener('hidden.bs.modal', handleModalHidden);
-
-      // Wyświetl loader
-      modalBody.innerHTML = `
-        <div class="d-flex justify-content-center align-items-center py-4">
-          <div class="spinner-border text-primary me-3" role="status">
-            <span class="visually-hidden">Zapisywanie...</span>
-          </div>
-          <span>Zapisywanie tekstu do serwera...</span>
-        </div>
-      `;
-
-      try {
-        // Wyślij tekst do serwera
-        const formData = new FormData();
-        formData.append('text_content', newFullText);
-
-        const response = await fetch(`/api/document/${docId}/update-ocr-text`, {
-          method: 'POST',
-          body: formData
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-          // Aktualizuj lokalny tekst
-          updateDisplayText(newFullText);
-
-          // Zaktualizuj cache OCR dla tej strony
-          ocrText[pageNum] = newFullText;
-
-          // Usuń event listener (już nie potrzebny)
-          modalElement.removeEventListener('hidden.bs.modal', handleModalHidden);
-
-          // Zamknij modal
-          modal.hide();
-
-          // Pokaż komunikat o powodzeniu z linkami
-          showSuccessAlert(result.message, result.action === 'created' ? 'success' : 'info', result.ocr_doc_id);
-
-        } else {
-          // Przywróć zawartość modalu i pokaż błąd
-          restoreContent();
-          showErrorAlert('Nie udało się zapisać tekstu: ' + (result.error || 'Nieznany błąd'));
-        }
-
-      } catch (error) {
-        // Przywróć zawartość modalu i pokaż błąd
-        restoreContent();
-        showErrorAlert('Błąd komunikacji z serwerem: ' + error.message);
-      }
-    };
-
+// Inicjalizacja OCR Viewer z konfiguracją specyficzną dla PDF
+let ocrViewer;
+
+document.addEventListener('DOMContentLoaded', function() {
+  // Inicjalizuj OCR Viewer
+  ocrViewer = new OcrViewer('ocrViewerContainer', {
+    docId: {{ doc.id }},
+    docType: 'pdf',
+    documentHasFullOcr: {{ 'true' if doc.ocr_status == 'done' else 'false' }},
+    parentId: {{ doc.parent_id or 'null' }}
   });
+
+  // Inicjalizuj Text Editor
+  const textEditor = new TextEditor('textEditorContainer', {
+    docId: {{ doc.id }},
+    autoSave: false,
+    placeholder: 'Brak tekstu OCR dla tej strony...'
+  });
+
+  // Udostępnij globalnie dla funkcji onclick w modalach
+  window.ocrViewer = ocrViewer;
+  window.textEditor = textEditor;
+
+  // === DODAJ TEN KOD TUTAJ ===
+  // Bezpośrednie połączenie komponentów (zastępuje system eventów)
+
+  // Funkcja do aktualizacji tekstu w edytorze z OCR
+  window.updateTextFromOcr = function(text) {
+    if (window.textEditor) {
+      window.textEditor.setText(text);
+    }
+  };
+
+  // Funkcja do aktualizacji cache OCR w viewer
+  window.updateOcrCache = function(text) {
+    if (window.ocrViewer) {
+      window.ocrViewer.state.ocrText[window.ocrViewer.state.currentPage] = text;
+    }
+  };
+
+  // Monitoruj zmiany w OCR Viewer i aktualizuj Text Editor
+  const originalUpdateDisplayText = ocrViewer.updateDisplayText;
+  ocrViewer.updateDisplayText = function(text) {
+    originalUpdateDisplayText.call(this, text);
+    window.updateTextFromOcr(text);
+  };
+
+  // Funkcja helper do zapisywania zmian (dla kompatybilności)
+  window.saveCurrentText = function() {
+    return textEditor.saveChanges();
+  };
+
+  console.log('PDF Viewer z OCR zainicjalizowany');
+});
+
+// Obsługa przycisków uruchamiania OCR (jeśli są)
+{% if doc.ocr_status != 'running' %}
+document.addEventListener('DOMContentLoaded', function() {
+  const runOcrForms = document.querySelectorAll('form[action*="run-ocr"]');
+  runOcrForms.forEach(form => {
+    form.addEventListener('submit', function() {
+      // Pokaż komunikat o rozpoczęciu OCR
+      window.alertManager.info('Rozpoczęto proces OCR. Rozpoznawanie tekstu w toku...', {
+        duration: 5000
+      });
+    });
+  });
+});
+{% endif %}
 </script>
-
-<style>
-#textDisplay:hover {
-  background-color: #e9ecef !important;
-}
-
-.edit-mode-hint {
-  background-color: #d1ecf1;
-  border: 1px solid #bee5eb;
-  border-radius: 0.25rem;
-  padding: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-/* Animacje przełączania trybów */
-#textDisplay, #textEditor {
-  transition: all 0.3s ease;
-}
-</style>
 {% endblock %}

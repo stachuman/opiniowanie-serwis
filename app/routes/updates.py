@@ -21,7 +21,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
-@router.get("/document/{doc_id}/update")
+@router.get("/document/{doc_id}/update", name="document_update_form")
 def document_update_form(request: Request, doc_id: int):
     """Formularz aktualizacji istniejącego dokumentu lub wgrania dokumentu Word dla pustej opinii."""
     with Session(engine) as session:
@@ -39,7 +39,7 @@ def document_update_form(request: Request, doc_id: int):
                 detail="Tylko dokumenty Word lub puste opinie mogą być aktualizowane tą metodą"
             )
 
-        # NOWE: Zbuduj nawigację
+        # Zbuduj nawigację
         breadcrumbs = BreadcrumbBuilder(request)
 
         if doc.is_main:
@@ -71,16 +71,15 @@ def document_update_form(request: Request, doc_id: int):
         "request": request,
         "doc": doc,
         "is_empty_opinion": is_empty_opinion,
-        "current_year": datetime.now().year,  # Dodaj rok
+        "current_year": datetime.now().year,
+        "page_type": "upload_form",  # NOWE: Dodany page_type
         **navigation
     }
 
     return templates.TemplateResponse("document_update.html", context)
 
 
-# W pliku app/routes/updates.py - poprawiona funkcja document_update
-
-@router.post("/document/{doc_id}/update")
+@router.post("/document/{doc_id}/update", name="document_update_post")
 async def document_update(request: Request, doc_id: int, updated_file: UploadFile = File(...),
                           keep_history: bool = Form(True), comments: str | None = Form(None)):
     """Aktualizacja istniejącego dokumentu lub wgranie dokumentu Word dla pustej opinii."""
@@ -112,7 +111,7 @@ async def document_update(request: Request, doc_id: int, updated_file: UploadFil
                 detail=f"Obsługiwane są tylko pliki Word (.doc, .docx). Przesłano: {suffix}"
             )
 
-        # POPRAWKA: Zachowaj stary plik i utwórz rekord historyczny jeśli trzeba
+        # Zachowaj stary plik i utwórz rekord historyczny jeśli trzeba
         if keep_history and not is_empty_opinion:
             old_file_path = FILES_DIR / doc.stored_filename
             if old_file_path.exists():
@@ -123,7 +122,7 @@ async def document_update(request: Request, doc_id: int, updated_file: UploadFil
                 history_path.parent.mkdir(exist_ok=True)
                 shutil.copy2(old_file_path, history_path)
 
-                # NOWE: Utwórz rekord w bazie danych dla wersji historycznej
+                # Utwórz rekord w bazie danych dla wersji historycznej
                 historical_doc = Document(
                     sygnatura=doc.sygnatura,
                     doc_type="Archiwalna wersja",
@@ -131,7 +130,7 @@ async def document_update(request: Request, doc_id: int, updated_file: UploadFil
                     stored_filename=f"history/{history_name}",  # Ścieżka względna
                     step=doc.step,
                     ocr_status="none",  # Historia nie wymaga OCR
-                    parent_id=doc_id,  # KLUCZOWE: Powiązanie z głównym dokumentem
+                    parent_id=doc_id,  # Powiązanie z głównym dokumentem
                     is_main=False,
                     content_type=doc.content_type,
                     mime_type=doc.mime_type,
@@ -188,7 +187,7 @@ async def document_update(request: Request, doc_id: int, updated_file: UploadFil
         else:
             return RedirectResponse(request.url_for("document_detail", doc_id=doc_id), status_code=303)
 
-@router.get("/document/{doc_id}/history")
+@router.get("/document/{doc_id}/history", name="document_history")
 def document_history(request: Request, doc_id: int):
     """Historia wersji dokumentu."""
     with Session(engine) as session:
@@ -209,7 +208,7 @@ def document_history(request: Request, doc_id: int):
             .order_by(Document.upload_time.desc())
         ).all()
 
-        # NOWE: Zbuduj nawigację
+        # Zbuduj nawigację
         breadcrumbs = BreadcrumbBuilder(request)
 
         if doc.is_main:
@@ -235,7 +234,8 @@ def document_history(request: Request, doc_id: int):
         "request": request,
         "doc": doc,
         "history_docs": history_docs,
-        "current_year": datetime.now().year,  # Dodaj rok
+        "current_year": datetime.now().year,
+        "page_type": "document_history",  # NOWE: Dodany page_type
         **navigation
     }
 

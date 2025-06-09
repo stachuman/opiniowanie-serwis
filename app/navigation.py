@@ -182,20 +182,21 @@ class ContextInfoBuilder:
 def add_common_context(context: dict) -> dict:
     """
     Dodaje wspólne zmienne do kontekstu, które są potrzebne we wszystkich templates.
-    
+
     Args:
         context: Istniejący kontekst template
-    
+
     Returns:
         Zaktualizowany kontekst z dodatkowymi zmiennymi
     """
     from datetime import datetime
-    
+
     return {
         **context,
         "current_year": datetime.now().year,
         # Dodaj inne wspólne zmienne tutaj w przyszłości
     }
+
 
 def build_opinion_navigation(request: Request, opinion: Document,
                              session: Session) -> Dict[str, Any]:
@@ -223,7 +224,7 @@ def build_opinion_navigation(request: Request, opinion: Document,
     # Akcje strony
     actions = (PageActionsBuilder(request)
                .add_primary("Dodaj dokumenty",
-                            str(request.url_for('opinion_upload_form', doc_id=opinion.id)),
+                            str(request.url_for('upload_to_opinion_form', doc_id=opinion.id)),  # POPRAWIONE
                             "plus-circle")
                .add_secondary("Historia wersji",
                               str(request.url_for('document_history', doc_id=opinion.id)),
@@ -396,3 +397,392 @@ def add_navigation_to_context(request: Request, base_context: dict,
         raise ValueError(f"Nieznany typ nawigacji: {nav_type}")
 
     return {**base_context, **navigation}
+
+
+def build_preview_navigation(request: Request, document: Document,
+                             session: Session, preview_type: str) -> Dict[str, Any]:
+    """
+    Zbuduj nawigację dla wszystkich typów podglądu (PDF, Word, Image).
+
+    Args:
+        request: FastAPI Request
+        document: Dokument do podglądu
+        session: Sesja bazy danych
+        preview_type: Typ podglądu ('pdf', 'word', 'image')
+
+    Returns:
+        Słownik z kompletną nawigacją
+    """
+    # Pobierz opinię nadrzędną jeśli istnieje
+    parent_opinion = None
+    if document.parent_id:
+        parent_opinion = session.get(Document, document.parent_id)
+
+    # Breadcrumbs
+    breadcrumbs = BreadcrumbBuilder(request)
+
+    if parent_opinion:
+        breadcrumbs.add_home().add_opinion(parent_opinion).add_document(document)
+    else:
+        breadcrumbs.add_documents().add_document(document)
+
+    # Dodaj odpowiedni breadcrumb dla typu podglądu
+    preview_configs = {
+        'pdf': ('Podgląd PDF', 'file-earmark-pdf'),
+        'word': ('Podgląd Word', 'file-earmark-word'),
+        'image': ('Podgląd obrazu', 'image'),
+        'text': ('Podgląd tekstowy', 'file-text')
+    }
+
+    title, icon = preview_configs.get(preview_type, ('Podgląd', 'eye'))
+    breadcrumbs.add_current(title, icon)
+
+    # Page Actions - spójne dla wszystkich typów podglądu
+    actions = (PageActionsBuilder(request)
+               .add_secondary("Szczegóły dokumentu",
+                              str(request.url_for('document_detail', doc_id=document.id)),
+                              "arrow-left")
+               .add_secondary("Pobierz",
+                              str(request.url_for('document_download', doc_id=document.id)),
+                              "download"))
+
+    # Dodaj specjalne akcje w zależności od typu
+    if preview_type == 'pdf':
+        actions.add_primary("Zaawansowany OCR",
+                            str(request.url_for('document_pdf_viewer', doc_id=document.id)),
+                            "search")
+    elif preview_type == 'image':
+        actions.add_primary("Zaawansowany OCR",
+                            str(request.url_for('document_image_viewer', doc_id=document.id)),
+                            "search")
+    elif preview_type == 'word' and document.mime_type and 'word' in document.mime_type:
+        actions.add_secondary("Aktualizuj",
+                              str(request.url_for('document_update_form', doc_id=document.id)),
+                              "pencil")
+
+    # Context Info - ujednolicone dla wszystkich typów
+    context_info = build_document_context_info(document)
+
+    return {
+        'breadcrumbs': breadcrumbs.build(),
+        'page_title': f"{title} - {document.original_filename}",
+        'page_actions': actions.build(),
+        'context_info': context_info
+    }
+
+
+def build_document_context_info(document: Document) -> List[Dict[str, str]]:
+    """
+    Zbuduj standardowe context_info dla dokumentu.
+
+    Args:
+        document: Dokument
+
+    Returns:
+        Lista z informacjami kontekstowymi
+    """
+    context_info = []
+
+    # Status OCR - zawsze na pierwszym miejscu
+    ocr_status_map = {
+        'none': ('Niewykonany', 'bg-secondary'),
+        'pending': ('Oczekuje', 'bg-warning'),
+        'running': ('W trakcie', 'bg-info'),
+        'done': ('Zakończony', 'bg-success'),
+        'fail': ('Błąd', 'bg-danger')
+    }
+
+    ocr_status, ocr_class = ocr_status_map.get(document.ocr_status, ('Nieznany', 'bg-secondary'))
+    context_info.append({
+        'label': 'Status OCR',
+        'value': ocr_status,
+        'badge_class': ocr_class
+    })
+
+    # Pewność OCR - jeśli dostępna
+    if document.ocr_status == 'done' and document.ocr_confidence:
+        context_info.append({
+            'label': 'Pewność OCR',
+            'value': f'{(document.ocr_confidence * 100):.0f}%',
+            'badge_class': 'bg-info'
+        })
+
+    # Typ dokumentu
+    context_info.append({
+        'label': 'Typ dokumentu',
+        'value': document.doc_type or 'Nieznany'
+    })
+
+    # Data dodania
+    context_info.append({
+        'label': 'Data dodania',
+        'value': document.upload_time.strftime('%Y-%m-%d %H:%M') if document.upload_time else 'Brak'
+    })
+
+    return context_info
+
+
+def build_form_navigation(request: Request, form_title: str,
+                          form_type: str = 'general') -> Dict[str, Any]:
+    """
+    Zbuduj nawigację dla formularzy (upload, create, update).
+
+    Args:
+        request: FastAPI Request
+        form_title: Tytuł formularza
+        form_type: Typ formularza ('upload', 'create', 'update', 'general')
+
+    Returns:
+        Słownik z nawigacją
+    """
+    breadcrumbs = BreadcrumbBuilder(request)
+
+    # Różne breadcrumbs w zależności od typu formularza
+    if form_type == 'upload':
+        breadcrumbs.add_home()
+    elif form_type == 'create':
+        breadcrumbs.add_home()
+    elif form_type == 'ocr':
+        breadcrumbs.add_documents()
+    else:
+        breadcrumbs.add_home()
+
+    breadcrumbs.add_current(form_title, "plus-circle")
+
+    # Page Actions - dla formularzy zwykle są proste
+    actions = []
+
+    if form_type == 'upload':
+        actions = (PageActionsBuilder(request)
+                   .add_secondary("Pusta opinia",
+                                  str(request.url_for('create_empty_opinion_form')),
+                                  "file-earmark")
+                   .add_secondary("Szybki OCR",
+                                  str(request.url_for('quick_ocr_form')),
+                                  "lightning")
+                   .build())
+    elif form_type == 'create':
+        actions = (PageActionsBuilder(request)
+                   .add_secondary("Powrót",
+                                  str(request.url_for('list_opinions')),
+                                  "arrow-left")
+                   .build())
+    elif form_type == 'ocr':
+        actions = (PageActionsBuilder(request)
+                   .add_primary("Nowa opinia z Word",
+                                str(request.url_for('upload_form')),
+                                "file-earmark-word")
+                   .add_secondary("Pusta opinia",
+                                  str(request.url_for('create_empty_opinion_form')),
+                                  "file-earmark")
+                   .build())
+
+    return {
+        'breadcrumbs': breadcrumbs.build(),
+        'page_title': form_title,
+        'page_actions': actions,
+        'context_info': []
+    }
+
+
+def build_advanced_viewer_navigation(request: Request, document: Document,
+                                     session: Session, viewer_type: str) -> Dict[str, Any]:
+    """
+    Zbuduj nawigację dla zaawansowanych viewerów (PDF z OCR, Image z OCR).
+
+    Args:
+        request: FastAPI Request
+        document: Dokument
+        session: Sesja bazy danych
+        viewer_type: Typ viewera ('pdf_viewer', 'image_viewer')
+
+    Returns:
+        Słownik z nawigacją
+    """
+    # Pobierz opinię nadrzędną jeśli istnieje
+    parent_opinion = None
+    if document.parent_id:
+        parent_opinion = session.get(Document, document.parent_id)
+
+    # Breadcrumbs
+    breadcrumbs = BreadcrumbBuilder(request)
+
+    if parent_opinion:
+        breadcrumbs.add_home().add_opinion(parent_opinion).add_document(document)
+    else:
+        breadcrumbs.add_documents().add_document(document)
+
+    # Tytuły dla różnych typów viewerów
+    viewer_configs = {
+        'pdf_viewer': ('Zaawansowany podgląd PDF', 'search'),
+        'image_viewer': ('Zaawansowany podgląd obrazu', 'search')
+    }
+
+    title, icon = viewer_configs.get(viewer_type, ('Zaawansowany podgląd', 'search'))
+    breadcrumbs.add_current(title, icon)
+
+    # Page Actions - powrót do szczegółów
+    actions = (PageActionsBuilder(request)
+               .add_secondary("Powrót do dokumentu",
+                              str(request.url_for('document_detail', doc_id=document.id)),
+                              "arrow-left")
+               .add_secondary("Pobierz",
+                              str(request.url_for('document_download', doc_id=document.id)),
+                              "download")
+               .build())
+
+    return {
+        'breadcrumbs': breadcrumbs.build(),
+        'page_title': f"{title} - {document.original_filename}",
+        'page_actions': actions,
+        'context_info': []
+    }
+
+
+def get_step_badge_class(step: str) -> str:
+    """
+    Zwróć klasę CSS dla badge'a statusu.
+
+    Args:
+        step: Status dokumentu (k1, k2, k3, k4)
+
+    Returns:
+        Klasa CSS Bootstrap
+    """
+    step_classes = {
+        'k1': 'bg-danger',
+        'k2': 'bg-warning',
+        'k3': 'bg-success',
+        'k4': 'bg-secondary'
+    }
+    return step_classes.get(step, 'bg-secondary')
+
+
+def get_step_icon(step: str) -> str:
+    """
+    Zwróć ikonę Bootstrap Icons dla statusu.
+
+    Args:
+        step: Status dokumentu (k1, k2, k3, k4)
+
+    Returns:
+        Nazwa ikony Bootstrap Icons
+    """
+    step_icons = {
+        'k1': 'pencil-fill',
+        'k2': 'journals',
+        'k3': 'check-circle-fill',
+        'k4': 'archive-fill'
+    }
+    return step_icons.get(step, 'question-circle')
+
+
+# ==================== AKTUALIZOWANE ISTNIEJĄCE FUNKCJE ====================
+
+def build_opinion_navigation(request: Request, opinion: Document,
+                             session: Session) -> Dict[str, Any]:
+    """
+    Zbuduj kompletną nawigację dla widoku opinii.
+    ZAKTUALIZOWANA WERSJA z lepszymi page_actions.
+    """
+    # Breadcrumbs
+    breadcrumbs = (BreadcrumbBuilder(request)
+                   .add_home()
+                   .add_current(opinion.sygnatura or opinion.original_filename or f"Opinia #{opinion.id}",
+                                "file-earmark-text")
+                   .build())
+
+    # Tytuł strony
+    page_title = f"Opinia #{opinion.id}"
+
+    # POPRAWKA: Lepsze page_actions
+    actions = (PageActionsBuilder(request)
+               .add_primary("Dodaj dokumenty",
+                            str(request.url_for('upload_to_opinion_form', doc_id=opinion.id)),
+                            "plus-circle")
+               .add_secondary("Edytuj opinię",
+                              str(request.url_for('document_detail', doc_id=opinion.id)),
+                              "pencil")
+               .build())
+
+    # Informacje kontekstowe
+    step_class = get_step_badge_class(opinion.step)
+    step_icon = get_step_icon(opinion.step)
+
+    context_info = (ContextInfoBuilder()
+                    .add_info("Sygnatura", opinion.sygnatura or "Brak")
+                    .add_info("Status", f"{opinion.step}", step_class)
+                    .add_info("Typ dokumentu", opinion.doc_type or "Nie określono")
+                    .add_info("Data utworzenia",
+                              opinion.upload_time.strftime('%Y-%m-%d %H:%M') if opinion.upload_time else "Brak")
+                    .build())
+
+    return {
+        'breadcrumbs': breadcrumbs,
+        'page_title': page_title,
+        'page_actions': actions,
+        'context_info': context_info,
+        'step_icon': step_icon
+    }
+
+
+def build_document_navigation(request: Request, document: Document,
+                              session: Session, parent_opinion: Document = None) -> Dict[str, Any]:
+    """
+    Zbuduj kompletną nawigację dla widoku dokumentu.
+    ZAKTUALIZOWANA WERSJA z lepszymi page_actions.
+    """
+    # Breadcrumbs
+    breadcrumb_builder = BreadcrumbBuilder(request)
+
+    if parent_opinion:
+        # Dokument należy do opinii
+        breadcrumb_builder.add_home().add_opinion(parent_opinion)
+    else:
+        # Dokument samodzielny
+        breadcrumb_builder.add_documents()
+
+    breadcrumbs = (breadcrumb_builder
+                   .add_current(document.original_filename or f"Dokument #{document.id}",
+                                "file-earmark")
+                   .build())
+
+    # Tytuł strony
+    page_title = f"Dokument #{document.id}"
+
+    # POPRAWKA: Lepsze page_actions
+    actions_builder = PageActionsBuilder(request)
+
+    # Zawsze dodaj pobieranie
+    actions_builder.add_secondary("Pobierz",
+                                  str(request.url_for('document_download', doc_id=document.id)),
+                                  "download")
+
+    # Akcje OCR w zależności od statusu
+    if document.ocr_status == 'none' and document.mime_type != 'text/plain':
+        actions_builder.add_primary("Uruchom OCR",
+                                    str(request.url_for('document_run_ocr', doc_id=document.id)),
+                                    "play")
+    elif document.ocr_status == 'done':
+        # Dodaj link do podsumowania AI jeśli OCR jest gotowy
+        actions_builder.add_secondary("Podsumowanie AI",
+                                      str(request.url_for('document_summarize_form', doc_id=document.id)),
+                                      "robot")
+
+    # Akcje aktualizacji dla dokumentów Word
+    if document.mime_type and 'word' in document.mime_type:
+        actions_builder.add_secondary("Aktualizuj",
+                                      str(request.url_for('document_update_form', doc_id=document.id)),
+                                      "pencil")
+
+    actions = actions_builder.build()
+
+    # Informacje kontekstowe
+    context_info = build_document_context_info(document)
+
+    return {
+        'breadcrumbs': breadcrumbs,
+        'page_title': page_title,
+        'page_actions': actions,
+        'context_info': context_info
+    }

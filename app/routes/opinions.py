@@ -14,10 +14,11 @@ from app.search import is_fuzzy_match, normalize_text_for_search
 from app.document_utils import STEP_ICON
 from app.text_extraction import get_document_text_content, HAS_DOCX
 
-# NOWY IMPORT: Moduł nawigacji
+# Moduł nawigacji
 from app.navigation import build_opinion_navigation, PageActionsBuilder
 
 router = APIRouter()
+
 
 @router.get("/", name="list_opinions")
 def list_opinions(request: Request,
@@ -34,10 +35,10 @@ def list_opinions(request: Request,
         # Pobierz wszystkie główne dokumenty (opinie)
         query = select(Document).where(Document.is_main == True)
 
-        # NOWA LOGIKA: Sprawdź czy to pierwsza wizyta czy użytkownik faktycznie filtruje
+        # Sprawdź czy to pierwsza wizyta czy użytkownik faktycznie filtruje
         query_params = request.query_params
         has_any_filter_params = any(param in query_params for param in ['k1', 'k2', 'k3', 'k4', 'search'])
-        
+
         if not has_any_filter_params:
             # PIERWSZA WIZYTA - ustaw domyślne filtry (k1, k2, k3 = True, k4 = False)
             k1, k2, k3, k4 = True, True, True, False
@@ -45,7 +46,7 @@ def list_opinions(request: Request,
             # UŻYTKOWNIK FILTRUJE - użyj dokładnie tego co przesłał
             # Checkboxy które nie są zaznaczone w ogóle nie są przesyłane, więc None oznacza False
             k1 = k1 if k1 is not None else False
-            k2 = k2 if k2 is not None else False  
+            k2 = k2 if k2 is not None else False
             k3 = k3 if k3 is not None else False
             k4 = k4 if k4 is not None else False
 
@@ -117,7 +118,7 @@ def list_opinions(request: Request,
             'fuzzy_search': fuzzy_search
         }
 
-        # NOWE: Zbuduj akcje strony
+        # Zbuduj akcje strony
         actions = (PageActionsBuilder(request)
                    .add_primary("Nowa opinia z Word",
                                 str(request.url_for('upload_form')),
@@ -130,29 +131,32 @@ def list_opinions(request: Request,
                                   "lightning")
                    .build())
 
-        # NOWE: Kompletny kontekst z nawigacją
+        # Kompletny kontekst z nawigacją
         context = {
-          "request": request, 
-          "opinions": opinions, 
-          "icons": STEP_ICON, 
-          "title": "Lista opinii",
-          "current_filters": current_filters,
-          "total_count": len(opinions),
-          "has_docx": HAS_DOCX,
-          "search_matches": search_matches,
-          # NOWE: Elementy nawigacji
-          "page_title": "Lista opinii",
-          "page_actions": actions,
-          "breadcrumbs": [],
-          "context_info": []
+            "request": request,
+            "opinions": opinions,
+            "icons": STEP_ICON,
+            "title": "Lista opinii",
+            "current_filters": current_filters,
+            "total_count": len(opinions),
+            "has_docx": HAS_DOCX,
+            "search_matches": search_matches,
+            "current_year": datetime.now().year,
+            "page_type": "opinions_list",  # NOWE: Dodany page_type
+            # Elementy nawigacji
+            "page_title": "Lista opinii",
+            "page_actions": actions,
+            "breadcrumbs": [],
+            "context_info": []
         }
-    
+
         from fastapi.templating import Jinja2Templates
         templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-    
+
         return templates.TemplateResponse("opinions.html", context)
 
-@router.get("/opinion/{doc_id}")
+
+@router.get("/opinion/{doc_id}", name="opinion_detail")
 def opinion_detail(request: Request, doc_id: int):
     """Szczegóły opinii wraz z dokumentami powiązanymi."""
     with Session(engine) as session:
@@ -201,18 +205,25 @@ def opinion_detail(request: Request, doc_id: int):
                  ("k3", "k3 – Opinia"),
                  ("k4", "k4 – Archiwum")]
 
-        # NOWE: Zbuduj nawigację za pomocą helpera
+        # Zbuduj nawigację za pomocą helpera
         navigation = build_opinion_navigation(request, opinion, session)
 
         from fastapi.templating import Jinja2Templates
         templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-        # NOWE: Dodaj elementy nawigacji do kontekstu
+        # Dodaj elementy nawigacji do kontekstu
         context = {
             "request": request,
             "opinion": opinion,
+            "related_docs": related_docs,  # DODANE: Potrzebne dla opinion_detail.html
             "grouped_docs": grouped_docs,
             "steps": steps,
+            "steps_dict": {  # DODANE: Mapowanie kroków
+                "k1": "k1 – Wywiad",
+                "k2": "k2 – Wyciąg z akt",
+                "k3": "k3 – Opinia",
+                "k4": "k4 – Archiwum"
+            },
             "title": navigation['page_title'],
             "total_docs": total_docs,
             "pending_docs": pending_docs,
@@ -220,14 +231,16 @@ def opinion_detail(request: Request, doc_id: int):
             "done_docs": done_docs,
             "failed_docs": failed_docs,
             "has_active_ocr": pending_docs > 0 or running_docs > 0,
-            # NOWE: Elementy nawigacji
+            "current_year": datetime.now().year,
+            "page_type": "opinion_detail",  # NOWE: Dodany page_type
+            # Elementy nawigacji
             **navigation
         }
 
         return templates.TemplateResponse("opinion_detail.html", context)
 
 
-@router.post("/opinion/{doc_id}/update")
+@router.post("/opinion/{doc_id}/update", name="opinion_update")
 def opinion_update(request: Request, doc_id: int,
                    step: str = Form(...),
                    sygnatura: str | None = Form(None),
@@ -251,7 +264,7 @@ def opinion_update(request: Request, doc_id: int,
     return RedirectResponse(request.url_for("opinion_detail", doc_id=doc_id), status_code=303)
 
 
-@router.post("/opinion/{doc_id}/update-note")
+@router.post("/opinion/{doc_id}/update-note", name="opinion_update_note")
 def opinion_update_note(request: Request, doc_id: int, note: str = Form("")):
     """Aktualizacja notatki do opinii."""
     with Session(engine) as session:
@@ -267,7 +280,7 @@ def opinion_update_note(request: Request, doc_id: int, note: str = Form("")):
         session.add(opinion)
         session.commit()
 
-    # POPRAWKA: Skonwertuj URL do stringa przed dodaniem parametrów
+    # Skonwertuj URL do stringa przed dodaniem parametrów
     base_url = str(request.url_for("list_opinions"))
     return RedirectResponse(
         f"{base_url}?note_updated=true",

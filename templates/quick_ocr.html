@@ -1,7 +1,8 @@
-<!-- templates/quick_ocr.html - ZAKTUALIZOWANY -->
 {% extends 'base.html' %}
 
-<!-- Breadcrumbs i page_title są automatyczne z base.html -->
+{# Ustawienia dla base.html - POPRAWKA #}
+{% set page_type = 'quick_ocr_form' %}
+{# POPRAWIONE: page_actions będą z backendu #}
 
 {% block content %}
 <div class="card">
@@ -11,17 +12,49 @@
     </h5>
   </div>
   <div class="card-body">
-    <form method="post" enctype="multipart/form-data">
+    <form method="post" enctype="multipart/form-data" id="quickOcrForm">
       <div class="mb-4">
         <label class="form-label">Wybierz pliki do przetwarzania OCR</label>
-        <input type="file" name="files" class="form-control" multiple required
+        <input type="file" name="files" id="ocrFiles" class="form-control" multiple required
                accept=".pdf,.png,.jpg,.jpeg,.gif,.bmp,.tiff">
         <div class="form-text">
-          <p>Obsługiwane formaty:</p>
-          <ul class="list-unstyled">
-            <li><i class="bi bi-file-earmark-pdf text-danger me-2"></i> Dokumenty PDF (*.pdf)</li>
-            <li><i class="bi bi-file-earmark-image text-info me-2"></i> Obrazy (*.png, *.jpg, *.jpeg, *.gif, *.bmp, *.tiff)</li>
-          </ul>
+          <div class="row mt-2">
+            <div class="col-md-6">
+              <p class="mb-1"><strong>Obsługiwane formaty:</strong></p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-file-earmark-pdf text-danger me-2"></i> Dokumenty PDF (*.pdf)</li>
+                <li><i class="bi bi-file-earmark-image text-info me-2"></i> Obrazy (*.png, *.jpg, *.jpeg, *.gif, *.bmp, *.tiff)</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <p class="mb-1"><strong>Informacje:</strong></p>
+              <ul class="list-unstyled small text-muted">
+                <li>• Maksymalny rozmiar pliku: 100MB</li>
+                <li>• OCR zostanie uruchomiony automatycznie</li>
+                <li>• Dokumenty trafią do kategorii "Niezwiązane"</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row mb-3">
+        <div class="col-md-6">
+          <label for="defaultDocType" class="form-label">Domyślny typ dokumentu</label>
+          <select class="form-select" id="defaultDocType" name="default_doc_type">
+            <option value="Skan">Skan</option>
+            <option value="Dokumentacja medyczna">Dokumentacja medyczna</option>
+            <option value="Akta">Akta sprawy</option>
+            <option value="Zaświadczenie">Zaświadczenie</option>
+            <option value="Inne" selected>Inne</option>
+          </select>
+          <div class="form-text">Zostanie przypisany do wszystkich plików</div>
+        </div>
+        <div class="col-md-6">
+          <label for="defaultNote" class="form-label">Notatka <small class="text-muted">(opcjonalna)</small></label>
+          <input type="text" class="form-control" id="defaultNote" name="default_note"
+                 placeholder="Np. Materiały z dnia 2025-01-15">
+          <div class="form-text">Zostanie dodana do wszystkich plików</div>
         </div>
       </div>
 
@@ -32,18 +65,283 @@
         Później możesz je przypisać do konkretnych opinii.
       </div>
 
+      <div class="alert alert-info" role="alert">
+        <i class="bi bi-info-circle-fill me-2"></i>
+        <strong>Proces przetwarzania:</strong>
+        <ol class="mb-0 mt-2">
+          <li>Przesłanie plików na serwer</li>
+          <li>Automatyczne rozpoznanie tekstu (OCR)</li>
+          <li>Utworzenie dokumentów z rozpoznanym tekstem</li>
+          <li>Przekierowanie do listy wszystkich dokumentów</li>
+        </ol>
+      </div>
+
       <div class="d-flex justify-content-end gap-2">
-        <!-- Automatyczny przycisk anuluj -->
-        {% if breadcrumbs and breadcrumbs|length > 1 %}
-          <a href="{{ breadcrumbs[-2].url }}" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left me-1"></i>Anuluj
-          </a>
-        {% endif %}
-        <button type="submit" class="btn btn-warning">
+        <button type="submit" class="btn btn-warning" id="submitBtn" disabled>
           <i class="bi bi-lightning me-1"></i>Rozpocznij OCR
         </button>
       </div>
     </form>
+
+    <!-- Element dla wskaźnika przetwarzania - domyślnie ukryty -->
+    <div id="processingIndicator" style="display: none;" class="mt-4">
+      <div class="card bg-warning bg-opacity-10 border-warning">
+        <div class="card-body text-center py-4">
+          <div class="spinner-border text-warning mb-3" role="status" style="width: 3rem; height: 3rem;">
+            <span class="visually-hidden">Przetwarzanie...</span>
+          </div>
+          <h5 class="text-warning">Pliki zostały przesłane</h5>
+          <p id="processingMessage">
+            Rozpoczęto przetwarzanie OCR. To może potrwać od kilkunastu sekund do kilku minut,
+            w zależności od liczby plików i ich złożoności.
+          </p>
+          <div class="progress mt-3" style="height: 6px;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning"
+                 role="progressbar" style="width: 100%"></div>
+          </div>
+          <p class="text-muted small mt-2">
+            Zostaniesz automatycznie przekierowany do listy dokumentów po zakończeniu.
+          </p>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Quick OCR Form Manager
+class QuickOcrFormManager {
+  constructor() {
+    this.form = document.getElementById('quickOcrForm');
+    this.submitBtn = document.getElementById('submitBtn');
+    this.processingIndicator = document.getElementById('processingIndicator');
+    this.processingMessage = document.getElementById('processingMessage');
+    this.filesInput = document.getElementById('ocrFiles');
+    this.docTypeSelect = document.getElementById('defaultDocType');
+
+    this.init();
+  }
+
+  init() {
+    this.setupEventListeners();
+    this.setupValidation();
+  }
+
+  setupEventListeners() {
+    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+    this.filesInput.addEventListener('change', () => this.validateFiles());
+    this.docTypeSelect.addEventListener('change', () => this.updateSubmitButton());
+  }
+
+  setupValidation() {
+    // Walidacja typów plików
+    this.filesInput.addEventListener('change', (e) => {
+      const files = e.target.files;
+      const allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff'];
+
+      for (let file of files) {
+        const extension = '.' + file.name.split('.').pop().toLowerCase();
+
+        if (!allowedExtensions.includes(extension)) {
+          window.alertManager.error(`Nieobsługiwany typ pliku: ${file.name}`);
+          e.target.value = '';
+          this.updateSubmitButton();
+          return;
+        }
+      }
+
+      this.updateSubmitButton();
+      this.showFilePreview();
+    });
+  }
+
+  validateFiles() {
+    const files = this.filesInput.files;
+
+    if (files.length === 0) {
+      return false;
+    }
+
+    // Sprawdź rozmiar plików
+    const maxSize = 100 * 1024 * 1024; // 100MB
+    let totalSize = 0;
+
+    for (let file of files) {
+      totalSize += file.size;
+
+      if (file.size > maxSize) {
+        window.alertManager.error(`Plik ${file.name} jest za duży (max 100MB)`);
+        return false;
+      }
+    }
+
+    if (totalSize > 500 * 1024 * 1024) { // 500MB total
+      window.alertManager.error('Łączny rozmiar plików przekracza 500MB');
+      return false;
+    }
+
+    return true;
+  }
+
+  updateSubmitButton() {
+    const files = this.filesInput.files;
+    const isValid = files.length > 0 && this.validateFiles();
+
+    this.submitBtn.disabled = !isValid;
+
+    if (files.length > 0) {
+      const fileText = files.length === 1 ? 'plik' : files.length <= 4 ? 'pliki' : 'plików';
+      this.submitBtn.innerHTML = `<i class="bi bi-lightning me-1"></i> Rozpocznij OCR (${files.length} ${fileText})`;
+    } else {
+      this.submitBtn.innerHTML = '<i class="bi bi-lightning me-1"></i> Rozpocznij OCR';
+    }
+
+    // Aktualizuj style przycisku
+    if (isValid) {
+      this.submitBtn.classList.remove('btn-secondary');
+      this.submitBtn.classList.add('btn-warning');
+    } else {
+      this.submitBtn.classList.remove('btn-warning');
+      this.submitBtn.classList.add('btn-secondary');
+    }
+  }
+
+  showFilePreview() {
+    const files = this.filesInput.files;
+    if (files.length === 0) return;
+
+    let previewHtml = '<div class="mt-3"><h6>Wybrane pliki do OCR:</h6><div class="row">';
+
+    for (let i = 0; i < Math.min(files.length, 6); i++) {
+      const file = files[i];
+      const extension = file.name.split('.').pop().toLowerCase();
+      let icon = 'bi-file-earmark';
+      let color = 'text-secondary';
+
+      if (extension === 'pdf') {
+        icon = 'bi-file-earmark-pdf';
+        color = 'text-danger';
+      } else if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff'].includes(extension)) {
+        icon = 'bi-file-earmark-image';
+        color = 'text-info';
+      }
+
+      previewHtml += `
+        <div class="col-md-4 mb-2">
+          <div class="card card-body py-2">
+            <div class="d-flex align-items-center">
+              <i class="bi ${icon} ${color} me-2"></i>
+              <div class="flex-grow-1">
+                <small class="fw-bold text-truncate d-block" style="max-width: 120px;" title="${file.name}">
+                  ${file.name}
+                </small>
+                <small class="text-muted">${this.formatFileSize(file.size)}</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    if (files.length > 6) {
+      previewHtml += `
+        <div class="col-md-4 mb-2">
+          <div class="card card-body py-2 text-center text-muted">
+            <small>... i ${files.length - 6} więcej</small>
+          </div>
+        </div>
+      `;
+    }
+
+    previewHtml += '</div></div>';
+
+    // Dodaj podgląd do formularza
+    const existingPreview = document.getElementById('filePreview');
+    if (existingPreview) {
+      existingPreview.remove();
+    }
+
+    const previewDiv = document.createElement('div');
+    previewDiv.id = 'filePreview';
+    previewDiv.innerHTML = previewHtml;
+
+    this.form.insertBefore(previewDiv, this.form.querySelector('.alert-warning'));
+  }
+
+  handleSubmit(e) {
+    if (!this.validateFiles()) {
+      e.preventDefault();
+      return;
+    }
+
+    const files = this.filesInput.files;
+
+    // Dostosuj komunikat w zależności od liczby plików
+    let message;
+    if (files.length === 1) {
+      message = `Rozpoczęto przetwarzanie OCR dla 1 pliku. To może potrwać od kilkunastu sekund do kilku minut.`;
+    } else {
+      message = `Rozpoczęto przetwarzanie OCR dla ${files.length} plików. To może potrwać od kilkunastu sekund do kilku minut.`;
+    }
+
+    // Aktualizuj komunikat
+    this.processingMessage.textContent = message;
+
+    // Ukryj przycisk i pokaż wskaźnik przetwarzania
+    this.submitBtn.disabled = true;
+    this.submitBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i> Przesyłanie...';
+    this.processingIndicator.style.display = 'block';
+
+    // Przewiń do wskaźnika przetwarzania
+    this.processingIndicator.scrollIntoView({ behavior: 'smooth' });
+
+    // Pozwól na normalne działanie formularza
+  }
+
+  formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  getSelectedFilesInfo() {
+    const files = this.filesInput.files;
+    let pdfCount = 0;
+    let imageCount = 0;
+    let totalSize = 0;
+
+    for (let file of files) {
+      totalSize += file.size;
+      const extension = file.name.split('.').pop().toLowerCase();
+
+      if (extension === 'pdf') {
+        pdfCount++;
+      } else {
+        imageCount++;
+      }
+    }
+
+    return {
+      total: files.length,
+      pdfCount,
+      imageCount,
+      totalSize,
+      totalSizeFormatted: this.formatFileSize(totalSize)
+    };
+  }
+}
+
+// Inicjalizacja po załadowaniu DOM
+document.addEventListener('DOMContentLoaded', function() {
+  const quickOcrFormManager = new QuickOcrFormManager();
+
+  console.log('Quick OCR Form Manager zainicjalizowany');
+});
+</script>
 {% endblock %}

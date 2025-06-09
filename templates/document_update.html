@@ -1,7 +1,9 @@
-<!-- templates/document_update.html - ZAKTUALIZOWANY -->
+<!-- templates/document_update.html - REFAKTORYZOWANA -->
 {% extends 'base.html' %}
 
-<!-- Breadcrumbs i page_title są automatyczne z base.html -->
+{# Ustawienia dla base.html - POPRAWKA: breadcrumbs i page_actions z backendu #}
+{% set page_type = 'upload_form' %}
+{# USUNIĘTE: breadcrumbs i page_actions - przychodzą z navigation.py #}
 
 {% block content %}
 <div class="card">
@@ -33,14 +35,15 @@
       </div>
     </div>
 
-    <form method="post" enctype="multipart/form-data">
+    <form method="post" enctype="multipart/form-data" id="updateForm">
       <div class="mb-4">
         <label class="form-label">Wybierz nowy plik Word</label>
         <input type="file" name="updated_file" class="form-control" required
-               accept=".doc,.docx">
+               accept=".doc,.docx" id="fileInput">
         <div class="form-text">
           Obsługiwane formaty: Dokumenty Word (*.doc, *.docx)
         </div>
+        <div id="fileValidation" class="invalid-feedback"></div>
       </div>
 
       {% if not is_empty_opinion %}
@@ -73,12 +76,7 @@
 
       <div class="d-flex justify-content-end gap-2">
         <!-- Automatyczny przycisk anuluj -->
-        {% if breadcrumbs and breadcrumbs|length > 1 %}
-          <a href="{{ breadcrumbs[-2].url }}" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left me-1"></i>Anuluj
-          </a>
-        {% endif %}
-        <button type="submit" class="btn btn-primary">
+        <button type="submit" class="btn btn-primary" id="submitBtn">
           <i class="bi bi-{% if is_empty_opinion %}upload{% else %}pencil{% endif %} me-1"></i>
           {% if is_empty_opinion %}Wgraj dokument{% else %}Aktualizuj dokument{% endif %}
         </button>
@@ -86,5 +84,140 @@
     </form>
   </div>
 </div>
-{% endblock %}
 
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const form = document.getElementById('updateForm');
+  const fileInput = document.getElementById('fileInput');
+  const submitBtn = document.getElementById('submitBtn');
+  const fileValidation = document.getElementById('fileValidation');
+
+  // Walidacja pliku
+  fileInput.addEventListener('change', function() {
+    const file = this.files[0];
+    if (!file) return;
+
+    // Sprawdź rozszerzenie
+    const allowedExtensions = ['.doc', '.docx'];
+    const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+
+    if (!allowedExtensions.includes(fileExtension)) {
+      this.setCustomValidity('Niepoprawny format pliku. Dozwolone są tylko pliki .doc i .docx');
+      this.classList.add('is-invalid');
+      fileValidation.textContent = 'Niepoprawny format pliku. Dozwolone są tylko pliki .doc i .docx';
+      return;
+    }
+
+    // Sprawdź rozmiar (max 50MB)
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (file.size > maxSize) {
+      this.setCustomValidity('Plik jest zbyt duży. Maksymalny rozmiar to 50MB');
+      this.classList.add('is-invalid');
+      fileValidation.textContent = 'Plik jest zbyt duży. Maksymalny rozmiar to 50MB';
+      return;
+    }
+
+    // Plik jest OK
+    this.setCustomValidity('');
+    this.classList.remove('is-invalid');
+    this.classList.add('is-valid');
+    fileValidation.textContent = '';
+  });
+
+  // Obsługa submitu formularza
+  form.addEventListener('submit', function(e) {
+    // Walidacja przed wysłaniem
+    if (!fileInput.files[0]) {
+      e.preventDefault();
+      window.alertManager.error('Wybierz plik do wgrania');
+      return;
+    }
+
+    // Pokaż loading na przycisku
+    submitBtn.disabled = true;
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Przetwarzanie...';
+
+    // Pokaż alert o procesie
+    window.alertManager.info('Trwa przetwarzanie pliku. Proszę czekać...');
+
+    // Przywróć przycisk w przypadku błędu (timeout)
+    setTimeout(() => {
+      if (submitBtn.disabled) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+      }
+    }, 30000); // 30 sekund timeout
+  });
+
+  // Drag & drop support
+  const formCard = document.querySelector('.card');
+
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    formCard.addEventListener(eventName, preventDefaults, false);
+  });
+
+  function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  ['dragenter', 'dragover'].forEach(eventName => {
+    formCard.addEventListener(eventName, highlight, false);
+  });
+
+  ['dragleave', 'drop'].forEach(eventName => {
+    formCard.addEventListener(eventName, unhighlight, false);
+  });
+
+  function highlight(e) {
+    formCard.classList.add('border-primary', 'bg-light');
+  }
+
+  function unhighlight(e) {
+    formCard.classList.remove('border-primary', 'bg-light');
+  }
+
+  formCard.addEventListener('drop', handleDrop, false);
+
+  function handleDrop(e) {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+
+    if (files.length > 0) {
+      fileInput.files = files;
+      fileInput.dispatchEvent(new Event('change'));
+
+      window.alertManager.success(`Plik "${files[0].name}" został dodany`);
+    }
+  }
+
+  // Info o klawiszach
+  document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'Enter') {
+      if (!submitBtn.disabled) {
+        form.submit();
+      }
+    }
+  });
+});
+</script>
+
+<style>
+.card.border-primary {
+  transition: all 0.3s ease;
+}
+
+.card.bg-light {
+  background-color: rgba(13, 110, 253, 0.1) !important;
+}
+
+.form-control.is-valid {
+  border-color: #198754;
+}
+
+.form-control.is-invalid {
+  border-color: #dc3545;
+}
+</style>
+{% endblock %}

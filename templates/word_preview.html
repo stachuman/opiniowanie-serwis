@@ -1,203 +1,391 @@
-<!-- templates/word_preview.html -->
 {% extends 'base.html' %}
 
+{# Ustawienia dla base.html - POPRAWKA #}
+{% set page_type = 'document_preview' %}
+{# USUNIĘTE: ręczne page_actions - przychodzą z navigation.py #}
+
 {% block content %}
-<div class="card">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <h5 class="mb-0">
-      <i class="bi bi-file-earmark-word text-primary me-2"></i>
-      Podgląd dokumentu Word: {{ doc.original_filename }}
-    </h5>
-    <div class="btn-group">
-      <!-- Przyciski akcji -->
-      <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="btn btn-sm btn-outline-secondary">
-        <i class="bi bi-arrow-left"></i> Szczegóły
-      </a>
-      <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary">
-        <i class="bi bi-download"></i> Pobierz
-      </a>
-      {% if doc.mime_type and 'word' in doc.mime_type %}
-      <a href="{{ url_for('document_update_form', doc_id=doc.id) }}" class="btn btn-sm btn-outline-warning">
-        <i class="bi bi-pencil"></i> Aktualizuj
-      </a>
+{% if error_message %}
+  <div class="alert alert-danger">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <strong>Błąd:</strong> {{ error_message }}
+  </div>
+
+  <div class="text-center mt-4">
+    <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-primary">
+      <i class="bi bi-download"></i> Pobierz dokument Word
+    </a>
+  </div>
+
+{% elif content %}
+  <!-- Document Preview Container -->
+  <div id="wordPreviewContainer" class="word-preview-container">
+    <!-- Toolbar będzie utworzony przez JavaScript -->
+  </div>
+
+  <!-- Dodatkowe informacje -->
+  <div class="card mt-3">
+    <div class="card-header">
+      <h6 class="mb-0">
+        <i class="bi bi-info-circle me-2"></i>Informacje o dokumencie
+      </h6>
+    </div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-6">
+          <ul class="list-unstyled mb-0">
+            <li><strong>Nazwa pliku:</strong> {{ doc.original_filename }}</li>
+            <li><strong>Typ MIME:</strong> {{ doc.mime_type or "Nieznany" }}</li>
+            <li><strong>Data dodania:</strong> {{ doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</li>
+          </ul>
+        </div>
+        <div class="col-md-6">
+          <ul class="list-unstyled mb-0">
+            <li><strong>Sygnatura:</strong> {{ doc.sygnatura or "Brak" }}</li>
+            <li><strong>Typ dokumentu:</strong> {{ doc.doc_type or "Nieznany" }}</li>
+            {% if doc.last_modified %}
+            <li><strong>Ostatnia modyfikacja:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') }}</li>
+            {% endif %}
+          </ul>
+        </div>
+      </div>
+
+      {% if doc.note %}
+      <div class="mt-3">
+        <strong>Notatka:</strong>
+        <div class="card bg-light mt-2">
+          <div class="card-body py-2">
+            <small>{{ doc.note }}</small>
+          </div>
+        </div>
+      </div>
       {% endif %}
     </div>
   </div>
 
-  <div class="card-body">
-    {% if error_message %}
-      <div class="alert alert-danger">
-        <i class="bi bi-exclamation-triangle-fill me-2"></i>
-        <strong>Błąd:</strong> {{ error_message }}
-      </div>
+{% else %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    Dokument Word jest pusty lub nie zawiera tekstu do wyświetlenia.
+  </div>
 
-      <div class="text-center mt-4">
-        <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-primary">
-          <i class="bi bi-download"></i> Pobierz dokument Word
-        </a>
-      </div>
+  <div class="text-center mt-4">
+    <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-primary">
+      <i class="bi bi-download"></i> Pobierz dokument Word
+    </a>
+  </div>
+{% endif %}
+{% endblock %}
 
-    {% elif content %}
-      <!-- Informacje o dokumencie -->
-      <div class="row mb-3">
-        <div class="col-md-8">
+{% block scripts %}
+{% if content %}
+<script>
+// Word Preview Manager
+class WordPreviewManager {
+  constructor(content) {
+    this.content = content;
+    this.searchTerm = '';
+    this.stats = this.calculateStats(content);
+
+    this.init();
+  }
+
+  init() {
+    this.setupDocumentPreview();
+    this.setupSearchFunctionality();
+    this.setupKeyboardShortcuts();
+  }
+
+  setupDocumentPreview() {
+    const container = document.getElementById('wordPreviewContainer');
+    if (!container) return;
+
+    // Utwórz strukturę podglądu
+    container.innerHTML = `
+      <!-- Toolbar z wyszukiwaniem i statystykami -->
+      <div class="card">
+        <div class="card-header">
+          <div class="row align-items-center">
+            <div class="col-md-6">
+              <div class="input-group input-group-sm">
+                <span class="input-group-text">
+                  <i class="bi bi-search"></i>
+                </span>
+                <input type="text" id="searchInput" class="form-control"
+                       placeholder="Wyszukaj w dokumencie..."
+                       onkeyup="if(event.key==='Enter') wordPreviewManager.performSearch()">
+                <button class="btn btn-outline-secondary" type="button" onclick="wordPreviewManager.performSearch()">
+                  Szukaj
+                </button>
+                <button class="btn btn-outline-secondary" type="button" onclick="wordPreviewManager.clearSearch()">
+                  Wyczyść
+                </button>
+              </div>
+            </div>
+            <div class="col-md-6 text-md-end">
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-secondary" data-copy-target="#wordContent">
+                  <i class="bi bi-clipboard"></i> Kopiuj tekst
+                </button>
+                <button type="button" class="btn btn-outline-info" onclick="wordPreviewManager.showStats()">
+                  <i class="bi bi-graph-up"></i> Statystyki
+                </button>
+                <button type="button" class="btn btn-outline-success" onclick="wordPreviewManager.exportText()">
+                  <i class="bi bi-file-earmark-text"></i> Eksportuj TXT
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Informacja o konwersji -->
+        <div class="card-header bg-light border-top">
           <small class="text-muted">
             <i class="bi bi-info-circle me-1"></i>
             Dokument Word został automatycznie skonwertowany do formatu tekstowego.
             Formatowanie, obrazy i niektóre elementy mogą nie być widoczne.
           </small>
         </div>
-        <div class="col-md-4 text-md-end">
-          <button type="button" class="btn btn-sm btn-outline-secondary" data-copy-target="#wordContent">
-            <i class="bi bi-clipboard"></i> Kopiuj tekst
-          </button>
-        </div>
-      </div>
 
-      <!-- Zawartość dokumentu -->
-      <div class="card bg-light">
-        <div class="card-body">
-          <div id="wordContent" class="word-content" style="max-height: 70vh; overflow-y: auto;">
-            <pre style="white-space: pre-wrap; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.95rem; line-height: 1.5; margin: 0;">{{ content }}</pre>
+        <!-- Zawartość dokumentu -->
+        <div class="card-body p-0">
+          <div id="wordContent" class="word-content p-3" style="max-height: 70vh; overflow-y: auto;">
+            <pre style="white-space: pre-wrap; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.95rem; line-height: 1.5; margin: 0;">${this.content}</pre>
+          </div>
+        </div>
+
+        <!-- Statystyki -->
+        <div class="card-footer">
+          <div class="row text-center">
+            <div class="col-md-3">
+              <small class="text-muted">
+                <i class="bi bi-file-text me-1"></i>
+                Znaków: <strong>${this.stats.characters}</strong>
+              </small>
+            </div>
+            <div class="col-md-3">
+              <small class="text-muted">
+                <i class="bi bi-fonts me-1"></i>
+                Słów: <strong>${this.stats.words}</strong>
+              </small>
+            </div>
+            <div class="col-md-3">
+              <small class="text-muted">
+                <i class="bi bi-paragraph me-1"></i>
+                Akapitów: <strong>${this.stats.paragraphs}</strong>
+              </small>
+            </div>
+            <div class="col-md-3">
+              <small class="text-muted">
+                <i class="bi bi-list-ol me-1"></i>
+                Linii: <strong>${this.stats.lines}</strong>
+              </small>
+            </div>
           </div>
         </div>
       </div>
+    `;
+  }
 
-      <!-- Statystyki tekstu -->
-      <div class="row mt-3">
-        <div class="col-md-6">
-          <small class="text-muted">
-            <i class="bi bi-file-text me-1"></i>
-            Liczba znaków: <span id="charCount">{{ content|length }}</span>
-          </small>
-        </div>
-        <div class="col-md-6 text-md-end">
-          <small class="text-muted">
-            <i class="bi bi-paragraph me-1"></i>
-            Liczba akapitów: <span id="paragraphCount">{{ content.split('\n\n')|length }}</span>
-          </small>
-        </div>
-      </div>
+  calculateStats(text) {
+    return {
+      characters: text.length,
+      words: text.trim().split(/\s+/).filter(word => word.length > 0).length,
+      paragraphs: text.split(/\n\s*\n/).filter(p => p.trim().length > 0).length,
+      lines: text.split('\n').length
+    };
+  }
 
-    {% else %}
-      <div class="alert alert-warning">
-        <i class="bi bi-exclamation-triangle-fill me-2"></i>
-        Dokument Word jest pusty lub nie zawiera tekstu do wyświetlenia.
-      </div>
-
-      <div class="text-center mt-4">
-        <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-primary">
-          <i class="bi bi-download"></i> Pobierz dokument Word
-        </a>
-      </div>
-    {% endif %}
-  </div>
-</div>
-
-<!-- Dodatkowe informacje -->
-<div class="card mt-3">
-  <div class="card-header">
-    <h6 class="mb-0">
-      <i class="bi bi-info-circle me-2"></i>Informacje o dokumencie
-    </h6>
-  </div>
-  <div class="card-body">
-    <div class="row">
-      <div class="col-md-6">
-        <ul class="list-unstyled mb-0">
-          <li><strong>Nazwa pliku:</strong> {{ doc.original_filename }}</li>
-          <li><strong>Typ MIME:</strong> {{ doc.mime_type or "Nieznany" }}</li>
-          <li><strong>Data dodania:</strong> {{ doc.upload_time.strftime('%Y-%m-%d %H:%M') }}</li>
-        </ul>
-      </div>
-      <div class="col-md-6">
-        <ul class="list-unstyled mb-0">
-          <li><strong>Sygnatura:</strong> {{ doc.sygnatura or "Brak" }}</li>
-          <li><strong>Typ dokumentu:</strong> {{ doc.doc_type or "Nieznany" }}</li>
-          {% if doc.last_modified %}
-          <li><strong>Ostatnia modyfikacja:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') }}</li>
-          {% endif %}
-        </ul>
-      </div>
-    </div>
-
-    {% if doc.note %}
-    <div class="mt-3">
-      <strong>Notatka:</strong>
-      <div class="card bg-light mt-2">
-        <div class="card-body py-2">
-          <small>{{ doc.note }}</small>
-        </div>
-      </div>
-    </div>
-    {% endif %}
-  </div>
-</div>
-
-{% endblock %}
-
-{% block scripts %}
-<script>
-// Policz słowa w dokumencie
-document.addEventListener('DOMContentLoaded', function() {
-  const content = document.getElementById('wordContent');
-  if (content) {
-    const text = content.innerText || content.textContent || '';
-    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
-
-    // Dodaj statystykę słów
-    const charCountElement = document.getElementById('charCount');
-    if (charCountElement && charCountElement.parentNode) {
-      const wordStats = document.createElement('small');
-      wordStats.className = 'text-muted ms-3';
-      wordStats.innerHTML = '<i class="bi bi-fonts me-1"></i>Liczba słów: ' + words.length;
-      charCountElement.parentNode.parentNode.appendChild(wordStats);
+  setupSearchFunctionality() {
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+      // Auto-search podczas pisania (z debounce)
+      let searchTimeout;
+      searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+          if (searchInput.value.length >= 2) {
+            this.performSearch();
+          } else if (searchInput.value.length === 0) {
+            this.clearSearch();
+          }
+        }, 300);
+      });
     }
   }
-});
 
-// Funkcja wyszukiwania w tekście
-function searchInDocument() {
-  const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-  const content = document.getElementById('wordContent');
+  setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+      // Ctrl+F - focus na wyszukiwanie
+      if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault();
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+          searchInput.focus();
+        }
+      }
 
-  if (!searchTerm) {
-    // Jeśli brak wyszukiwania, przywróć oryginalny tekst
-    location.reload();
-    return;
+      // Escape - wyczyść wyszukiwanie
+      if (e.key === 'Escape') {
+        this.clearSearch();
+        document.getElementById('searchInput').blur();
+      }
+
+      // Ctrl+A w kontenerze - zaznacz cały tekst
+      if (e.ctrlKey && e.key === 'a' && e.target.closest('#wordContent')) {
+        e.preventDefault();
+        this.selectAllText();
+      }
+    });
   }
 
-  const originalText = content.innerText || content.textContent;
-  const highlightedText = originalText.replace(
-    new RegExp(searchTerm, 'gi'),
-    '<mark>$&</mark>'
-  );
+  performSearch() {
+    const searchInput = document.getElementById('searchInput');
+    const contentContainer = document.getElementById('wordContent');
 
-  content.innerHTML = '<pre style="white-space: pre-wrap; font-family: \'Segoe UI\', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.95rem; line-height: 1.5; margin: 0;">' + highlightedText + '</pre>';
-}
+    if (!searchInput || !contentContainer) return;
 
-// Dodaj pasek wyszukiwania po załadowaniu strony
-document.addEventListener('DOMContentLoaded', function() {
-  const contentCard = document.querySelector('.word-content').closest('.card');
-  if (contentCard && document.getElementById('wordContent')) {
-    const searchBar = document.createElement('div');
-    searchBar.className = 'card-header d-flex align-items-center';
-    searchBar.innerHTML = `
-      <div class="input-group input-group-sm">
-        <span class="input-group-text">
-          <i class="bi bi-search"></i>
-        </span>
-        <input type="text" id="searchInput" class="form-control" placeholder="Wyszukaj w dokumencie..." onkeyup="if(event.key==='Enter') searchInDocument()">
-        <button class="btn btn-outline-secondary" type="button" onclick="searchInDocument()">
-          Szukaj
-        </button>
-        <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('searchInput').value=''; location.reload();">
-          Wyczyść
-        </button>
+    this.searchTerm = searchInput.value.toLowerCase().trim();
+
+    if (!this.searchTerm) {
+      this.clearSearch();
+      return;
+    }
+
+    // Podświetl znalezione fragmenty
+    const highlightedText = this.content.replace(
+      new RegExp(this.escapeRegExp(this.searchTerm), 'gi'),
+      '<mark style="background-color: #ffeb3b; padding: 1px;">$&</mark>'
+    );
+
+    contentContainer.innerHTML = `
+      <pre style="white-space: pre-wrap; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.95rem; line-height: 1.5; margin: 0;">${highlightedText}</pre>
+    `;
+
+    // Przewiń do pierwszego wystąpienia
+    const firstMark = contentContainer.querySelector('mark');
+    if (firstMark) {
+      firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // Pokaż liczbę znalezionych wystąpień
+    const matches = (this.content.match(new RegExp(this.escapeRegExp(this.searchTerm), 'gi')) || []).length;
+    this.showSearchResults(matches);
+  }
+
+  clearSearch() {
+    const contentContainer = document.getElementById('wordContent');
+    const searchInput = document.getElementById('searchInput');
+
+    if (contentContainer) {
+      contentContainer.innerHTML = `
+        <pre style="white-space: pre-wrap; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.95rem; line-height: 1.5; margin: 0;">${this.content}</pre>
+      `;
+    }
+
+    if (searchInput) {
+      searchInput.value = '';
+    }
+
+    this.hideSearchResults();
+    this.searchTerm = '';
+  }
+
+  showSearchResults(matchCount) {
+    // Usuń poprzedni wskaźnik
+    this.hideSearchResults();
+
+    const searchInput = document.getElementById('searchInput');
+    if (!searchInput) return;
+
+    const indicator = document.createElement('small');
+    indicator.id = 'searchResultIndicator';
+    indicator.className = 'text-muted ms-2';
+    indicator.textContent = `${matchCount} ${matchCount === 1 ? 'wystąpienie' : 'wystąpień'}`;
+
+    searchInput.parentNode.appendChild(indicator);
+  }
+
+  hideSearchResults() {
+    const indicator = document.getElementById('searchResultIndicator');
+    if (indicator) {
+      indicator.remove();
+    }
+  }
+
+  showStats() {
+    const modalHtml = `
+      <div class="row">
+        <div class="col-md-6">
+          <ul class="list-unstyled">
+            <li><strong>Znaków:</strong> ${this.stats.characters.toLocaleString()}</li>
+            <li><strong>Znaków bez spacji:</strong> ${this.content.replace(/\s/g, '').length.toLocaleString()}</li>
+            <li><strong>Słów:</strong> ${this.stats.words.toLocaleString()}</li>
+            <li><strong>Średnia długość słowa:</strong> ${(this.content.replace(/\s/g, '').length / this.stats.words).toFixed(1)} znaków</li>
+          </ul>
+        </div>
+        <div class="col-md-6">
+          <ul class="list-unstyled">
+            <li><strong>Akapitów:</strong> ${this.stats.paragraphs.toLocaleString()}</li>
+            <li><strong>Linii:</strong> ${this.stats.lines.toLocaleString()}</li>
+            <li><strong>Średnio słów na akapit:</strong> ${(this.stats.words / this.stats.paragraphs).toFixed(1)}</li>
+            <li><strong>Rozmiar w bajtach:</strong> ${new Blob([this.content]).size.toLocaleString()}</li>
+          </ul>
+        </div>
       </div>
     `;
-    contentCard.insertBefore(searchBar, contentCard.firstChild);
+
+    window.modalManager.show('documentStatsModal', {
+      title: '<i class="bi bi-graph-up me-2"></i>Statystyki dokumentu',
+      body: modalHtml,
+      size: 'lg'
+    });
   }
+
+  async exportText() {
+    try {
+      const blob = new Blob([this.content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '{{ doc.original_filename }}'.replace(/\.[^/.]+$/, '') + '.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      URL.revokeObjectURL(url);
+
+      window.alertManager.success('Tekst został wyeksportowany jako plik TXT');
+    } catch (error) {
+      window.alertManager.error('Nie udało się wyeksportować tekstu');
+    }
+  }
+
+  selectAllText() {
+    const contentContainer = document.getElementById('wordContent');
+    if (!contentContainer) return;
+
+    const range = document.createRange();
+    const selection = window.getSelection();
+
+    range.selectNodeContents(contentContainer);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+}
+
+// Inicjalizacja po załadowaniu DOM
+document.addEventListener('DOMContentLoaded', function() {
+  const content = {{ content|tojson }};
+  window.wordPreviewManager = new WordPreviewManager(content);
+
+  console.log('Word Preview Manager zainicjalizowany');
 });
 </script>
+{% endif %}
 {% endblock %}

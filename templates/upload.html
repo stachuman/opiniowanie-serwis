@@ -1,7 +1,8 @@
-<!-- templates/upload.html - ZAKTUALIZOWANY -->
 {% extends 'base.html' %}
 
-<!-- Breadcrumbs i page_title są automatyczne z base.html -->
+{# Ustawienia dla base.html - POPRAWKA: usuń ręczne page_actions #}
+{% set page_type = 'upload_form' %}
+{# POPRAWIONE: page_actions będą z backendu #}
 
 {% block content %}
 <div class="card">
@@ -11,37 +12,247 @@
     </h5>
   </div>
   <div class="card-body">
-    <form method="post" enctype="multipart/form-data">
+    <form method="post" enctype="multipart/form-data" id="uploadWordForm">
+      <!-- Reszta kodu formularza bez zmian -->
       <div class="mb-4">
         <label class="form-label">Wybierz plik Word</label>
-        <input type="file" name="files" class="form-control" multiple required
+        <input type="file" name="files" id="wordFiles" class="form-control" multiple required
                accept=".doc,.docx">
         <div class="form-text">
-          <p>Obsługiwane formaty:</p>
-          <ul class="list-unstyled">
-            <li><i class="bi bi-file-earmark-word text-primary me-2"></i> Dokumenty Word (*.doc, *.docx)</li>
-          </ul>
+          <div class="row mt-2">
+            <div class="col-md-6">
+              <p class="mb-1"><strong>Obsługiwane formaty:</strong></p>
+              <ul class="list-unstyled">
+                <li><i class="bi bi-file-earmark-word text-primary me-2"></i> Dokumenty Word (*.doc, *.docx)</li>
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <p class="mb-1"><strong>Wymagania:</strong></p>
+              <ul class="list-unstyled small text-muted">
+                <li>• Maksymalny rozmiar pliku: 50MB</li>
+                <li>• Można wybrać wiele plików naraz</li>
+                <li>• Pierwszy plik stanie się opinią główną</li>
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
-     
+
       <div class="alert alert-info" role="alert">
         <i class="bi bi-info-circle-fill me-2"></i>
         <strong>Informacja:</strong> Po utworzeniu opinii będziesz mógł dodać do niej dodatkowe dokumenty
         (PDF, skany, obrazy), które zostaną automatycznie przetworzone przez OCR.
       </div>
-      
+
+      <!-- POPRAWKA: Usuń ręczne przyciski, użyj tylko przycisk submit -->
       <div class="d-flex justify-content-end gap-2">
-        <!-- Automatyczny przycisk anuluj używający breadcrumbs -->
-        {% if breadcrumbs and breadcrumbs|length > 1 %}
-          <a href="{{ breadcrumbs[-2].url }}" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left me-1"></i>Anuluj
-          </a>
-        {% endif %}
-        <button type="submit" class="btn btn-primary">
+        <button type="submit" class="btn btn-primary" id="submitBtn" disabled>
           <i class="bi bi-upload me-1"></i>Dodaj opinię
         </button>
       </div>
     </form>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Upload Word Form Manager
+class UploadWordFormManager {
+  constructor() {
+    this.form = document.getElementById('uploadWordForm');
+    this.submitBtn = document.getElementById('submitBtn');
+    this.filesInput = document.getElementById('wordFiles');
+
+    this.init();
+  }
+
+  init() {
+    this.setupEventListeners();
+    this.setupValidation();
+  }
+
+  setupEventListeners() {
+    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+    this.filesInput.addEventListener('change', () => this.validateFiles());
+  }
+
+  setupValidation() {
+    // Walidacja typów plików
+    this.filesInput.addEventListener('change', (e) => {
+      const files = e.target.files;
+      const allowedExtensions = ['.doc', '.docx'];
+
+      for (let file of files) {
+        const extension = '.' + file.name.split('.').pop().toLowerCase();
+
+        if (!allowedExtensions.includes(extension)) {
+          window.alertManager.error(`Nieobsługiwany typ pliku: ${file.name}. Wybierz pliki Word (.doc, .docx)`);
+          e.target.value = '';
+          this.updateSubmitButton();
+          return;
+        }
+      }
+
+      this.updateSubmitButton();
+    });
+  }
+
+  validateFiles() {
+    const files = this.filesInput.files;
+
+    if (files.length === 0) {
+      return false;
+    }
+
+    // Sprawdź rozmiar plików
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    let totalSize = 0;
+
+    for (let file of files) {
+      totalSize += file.size;
+
+      if (file.size > maxSize) {
+        window.alertManager.error(`Plik ${file.name} jest za duży (max 50MB)`);
+        return false;
+      }
+    }
+
+    if (totalSize > 200 * 1024 * 1024) { // 200MB total
+      window.alertManager.error('Łączny rozmiar plików przekracza 200MB');
+      return false;
+    }
+
+    return true;
+  }
+
+  updateSubmitButton() {
+    const files = this.filesInput.files;
+    const isValid = files.length > 0 && this.validateFiles();
+
+    this.submitBtn.disabled = !isValid;
+
+    if (files.length > 0) {
+      if (files.length === 1) {
+        this.submitBtn.innerHTML = '<i class="bi bi-upload me-1"></i> Dodaj opinię';
+      } else {
+        const mainFile = files[0].name;
+        this.submitBtn.innerHTML = `<i class="bi bi-upload me-1"></i> Dodaj ${files.length} plików`;
+        this.submitBtn.title = `Opinia główna: ${mainFile}`;
+      }
+    } else {
+      this.submitBtn.innerHTML = '<i class="bi bi-upload me-1"></i> Dodaj opinię';
+      this.submitBtn.title = '';
+    }
+
+    // Aktualizuj style przycisku
+    if (isValid) {
+      this.submitBtn.classList.remove('btn-secondary');
+      this.submitBtn.classList.add('btn-primary');
+    } else {
+      this.submitBtn.classList.remove('btn-primary');
+      this.submitBtn.classList.add('btn-secondary');
+    }
+  }
+
+  handleSubmit(e) {
+    if (!this.validateFiles()) {
+      e.preventDefault();
+      return;
+    }
+
+    const files = this.filesInput.files;
+
+    // Pokaż loading
+    this.submitBtn.disabled = true;
+    this.submitBtn.innerHTML = `<i class="bi bi-hourglass-split me-1"></i> Przetwarzanie ${files.length === 1 ? 'pliku' : files.length + ' plików'}...`;
+
+    // Pokaż informację o procesie
+    if (files.length > 1) {
+      window.alertManager.info(`Przetwarzanie ${files.length} plików Word. Pierwszy plik (${files[0].name}) stanie się opinią główną.`, {
+        duration: 5000
+      });
+    }
+
+    // Pozwól na normalne działanie formularza
+  }
+
+  // Dodatkowe metody pomocnicze
+  getFileInfo() {
+    const files = this.filesInput.files;
+    const fileInfo = [];
+
+    for (let file of files) {
+      fileInfo.push({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        sizeFormatted: this.formatFileSize(file.size)
+      });
+    }
+
+    return fileInfo;
+  }
+
+  formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  showFilePreview() {
+    const files = this.filesInput.files;
+    if (files.length === 0) return;
+
+    const fileList = this.getFileInfo();
+    let previewHtml = '<div class="mt-3"><strong>Wybrane pliki:</strong><ul class="list-group mt-2">';
+
+    fileList.forEach((file, index) => {
+      const badgeClass = index === 0 ? 'bg-warning' : 'bg-light text-dark';
+      const label = index === 0 ? 'OPINIA GŁÓWNA' : 'DOKUMENT';
+
+      previewHtml += `
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <div>
+            <i class="bi bi-file-earmark-word text-primary me-2"></i>
+            <strong>${file.name}</strong>
+            <small class="text-muted d-block">${file.sizeFormatted}</small>
+          </div>
+          <span class="badge ${badgeClass}">${label}</span>
+        </li>
+      `;
+    });
+
+    previewHtml += '</ul></div>';
+
+    // Dodaj podgląd do formularza
+    const existingPreview = document.getElementById('filePreview');
+    if (existingPreview) {
+      existingPreview.remove();
+    }
+
+    const previewDiv = document.createElement('div');
+    previewDiv.id = 'filePreview';
+    previewDiv.innerHTML = previewHtml;
+
+    this.form.insertBefore(previewDiv, this.form.querySelector('.d-flex'));
+  }
+}
+
+// Inicjalizacja po załadowaniu DOM
+document.addEventListener('DOMContentLoaded', function() {
+  const uploadWordFormManager = new UploadWordFormManager();
+
+  // Pokaż podgląd plików przy wyborze
+  document.getElementById('wordFiles').addEventListener('change', () => {
+    uploadWordFormManager.showFilePreview();
+  });
+
+  console.log('Upload Word Form Manager zainicjalizowany');
+});
+</script>
 {% endblock %}

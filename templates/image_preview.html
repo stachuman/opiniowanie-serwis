@@ -1,98 +1,45 @@
-<!-- templates/image_preview.html -->
+<!-- templates/image_preview.html - REFAKTORYZOWANA -->
 {% extends 'base.html' %}
 
+{# Ustawienia dla base.html - POPRAWKA #}
+{% set page_type = 'image_preview' %}
+{# USUNIĘTE: ręczne page_actions i context_info - przychodzą z navigation.py #}
+
 {% block content %}
-<div class="card">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <h5 class="mb-0">
-      <i class="bi bi-image text-info me-2"></i>
-      Podgląd obrazu: {{ doc.original_filename }}
-    </h5>
-    <div class="btn-group">
-      <!-- Przyciski akcji -->
-      <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="btn btn-sm btn-outline-secondary">
-        <i class="bi bi-arrow-left"></i> Szczegóły
-      </a>
-      <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary">
-        <i class="bi bi-download"></i> Pobierz
-      </a>
-      <a href="{{ url_for('document_image_viewer', doc_id=doc.id) }}" class="btn btn-sm btn-outline-success">
-        <i class="bi bi-search"></i> Zaawansowany podgląd z OCR
-      </a>
-    </div>
-  </div>
+<!-- Podgląd obrazu z użyciem DocumentPreview component -->
+<div id="imagePreviewContainer" style="height: 75vh;"></div>
 
-  <div class="card-body">
-    <!-- Narzędzia podglądu -->
-    <div class="image-toolbar mb-3 p-2 bg-light rounded">
-      <div class="row align-items-center">
-        <div class="col-md-6">
-          <div class="btn-group btn-group-sm">
-            <button type="button" class="btn btn-outline-secondary" onclick="zoomIn()">
-              <i class="bi bi-zoom-in"></i> Powiększ
-            </button>
-            <button type="button" class="btn btn-outline-secondary" onclick="zoomOut()">
-              <i class="bi bi-zoom-out"></i> Pomniejsz
-            </button>
-            <button type="button" class="btn btn-outline-secondary" onclick="resetZoom()">
-              <i class="bi bi-arrows-fullscreen"></i> Resetuj
-            </button>
-            <button type="button" class="btn btn-outline-secondary" onclick="fitToScreen()">
-              <i class="bi bi-aspect-ratio"></i> Dopasuj
-            </button>
-          </div>
-        </div>
-        <div class="col-md-6 text-md-end">
-          <span class="badge bg-info" id="zoomLevel">100%</span>
-          <span class="badge bg-secondary ms-2" id="imageSize">Ładowanie...</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Kontener obrazu -->
-    <div class="image-container" style="max-height: 70vh; overflow: auto; border: 1px solid #dee2e6; border-radius: 0.375rem; background-color: #f8f9fa; text-align: center; padding: 20px;">
-      <img id="previewImage"
-           src="{{ url_for('document_preview', doc_id=doc.id) }}"
-           alt="Podgląd: {{ doc.original_filename }}"
-           class="img-fluid"
-           style="max-width: 100%; height: auto; transition: transform 0.2s ease; cursor: grab;"
-           onload="updateImageInfo()"
-           ondragstart="return false;">
-    </div>
-
-    <!-- Informacja o OCR -->
-    {% if doc.ocr_status == 'done' %}
-    <div class="alert alert-success mt-3">
-      <i class="bi bi-check-circle me-2"></i>
-      <strong>OCR zakończony!</strong>
-      Tekst został rozpoznany z tego obrazu.
-      <a href="{{ url_for('document_image_viewer', doc_id=doc.id) }}" class="alert-link">
-        Użyj zaawansowanego podglądu
-      </a>
-      aby zobaczyć rozpoznany tekst i zaznaczać fragmenty.
-    </div>
-    {% elif doc.ocr_status == 'none' %}
-    <div class="alert alert-info mt-3">
-      <i class="bi bi-info-circle me-2"></i>
-      <strong>OCR nie został uruchomiony.</strong>
-      Możesz uruchomić rozpoznawanie tekstu w
-      <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="alert-link">szczegółach dokumentu</a>.
-    </div>
-    {% elif doc.ocr_status in ['pending', 'running'] %}
-    <div class="alert alert-warning mt-3">
-      <i class="bi bi-hourglass-split me-2"></i>
-      <strong>OCR w trakcie przetwarzania...</strong>
-      Rozpoznawanie tekstu z tego obrazu jest obecnie wykonywane.
-    </div>
-    {% endif %}
-  </div>
+<!-- OCR Status Info -->
+{% if doc.ocr_status == 'done' %}
+<div class="alert alert-success">
+  <i class="bi bi-check-circle me-2"></i>
+  <strong>OCR zakończony!</strong>
+  Tekst został rozpoznany z tego obrazu.
+  <a href="{{ url_for('document_image_viewer', doc_id=doc.id) }}" class="alert-link">
+    Użyj zaawansowanego podglądu
+  </a>
+  aby zobaczyć rozpoznany tekst i zaznaczać fragmenty.
 </div>
+{% elif doc.ocr_status == 'none' %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-2"></i>
+  <strong>OCR nie został uruchomiony.</strong>
+  Możesz uruchomić rozpoznawanie tekstu w
+  <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="alert-link">szczegółach dokumentu</a>.
+</div>
+{% elif doc.ocr_status in ['pending', 'running'] %}
+<div class="alert alert-warning">
+  <i class="bi bi-hourglass-split me-2"></i>
+  <strong>OCR w trakcie przetwarzania...</strong>
+  Rozpoznawanie tekstu z tego obrazu jest obecnie wykonywane.
+</div>
+{% endif %}
 
-<!-- Informacje o obrazie -->
+<!-- Szczegółowe informacje o obrazie -->
 <div class="card mt-3">
   <div class="card-header">
     <h6 class="mb-0">
-      <i class="bi bi-info-circle me-2"></i>Informacje o obrazie
+      <i class="bi bi-info-circle me-2"></i>Szczegółowe informacje o obrazie
     </h6>
   </div>
   <div class="card-body">
@@ -112,21 +59,10 @@
           {% if doc.last_modified %}
           <li><strong>Ostatnia modyfikacja:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') }}</li>
           {% endif %}
-          <li><strong>Status OCR:</strong>
-            {% if doc.ocr_status == 'done' %}
-              <span class="badge bg-success">Zakończony</span>
-              {% if doc.ocr_confidence %}
-                <small class="text-muted">({{ (doc.ocr_confidence * 100) | round }}% pewności)</small>
-              {% endif %}
-            {% elif doc.ocr_status == 'running' %}
-              <span class="badge bg-primary">W trakcie</span>
-            {% elif doc.ocr_status == 'pending' %}
-              <span class="badge bg-warning">Oczekuje</span>
-            {% elif doc.ocr_status == 'fail' %}
-              <span class="badge bg-danger">Błąd</span>
-            {% else %}
-              <span class="badge bg-secondary">Niewykonany</span>
-            {% endif %}
+          <li><strong>Status:</strong>
+            <span class="badge bg-{% if doc.step == 'k1' %}danger{% elif doc.step == 'k2' %}warning{% elif doc.step == 'k3' %}success{% else %}secondary{% endif %}">
+              {{ doc.step }}
+            </span>
           </li>
         </ul>
       </div>
@@ -145,190 +81,241 @@
   </div>
 </div>
 
-{% endblock %}
+<!-- Instrukcje użytkowania -->
+<div class="card mt-3">
+  <div class="card-header">
+    <h6 class="mb-0">
+      <i class="bi bi-question-circle me-2"></i>Instrukcje użytkowania
+    </h6>
+  </div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-6">
+        <h6>Podstawowe funkcje:</h6>
+        <ul class="small">
+          <li><strong>Zoom:</strong> Ctrl + scroll, kółko myszy lub przyciski +/-</li>
+          <li><strong>Przeciąganie:</strong> Kliknij i przeciągnij obraz przy zoom > 100%</li>
+          <li><strong>Dopasuj do ekranu:</strong> Klawisz <kbd>F</kbd> lub przycisk w toolbar</li>
+          <li><strong>Reset zoom:</strong> Klawisz <kbd>0</kbd> lub przycisk reset</li>
+        </ul>
+      </div>
+      <div class="col-md-6">
+        <h6>Zaawansowane funkcje:</h6>
+        <ul class="small">
+          <li><strong>Pełny ekran:</strong> Przycisk w toolbar lub <kbd>F11</kbd></li>
+          <li><strong>OCR fragmentów:</strong> Użyj zaawansowanego podglądu</li>
+          <li><strong>Kopiowanie:</strong> Kliknij prawym przyciskiem i "Kopiuj obraz"</li>
+          <li><strong>Skróty:</strong> <kbd>+</kbd> zoom in, <kbd>-</kbd> zoom out</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
 
-{% block scripts %}
 <script>
-let currentZoom = 1.0;
-let isDragging = false;
-let startX, startY, scrollLeft, scrollTop;
-
-// Funkcje zoomu
-function zoomIn() {
-  currentZoom *= 1.2;
-  applyZoom();
-}
-
-function zoomOut() {
-  currentZoom /= 1.2;
-  if (currentZoom < 0.1) currentZoom = 0.1;
-  applyZoom();
-}
-
-function resetZoom() {
-  currentZoom = 1.0;
-  applyZoom();
-}
-
-function fitToScreen() {
-  const img = document.getElementById('previewImage');
-  const container = img.parentElement;
-
-  const containerWidth = container.clientWidth - 40; // odejmij padding
-  const containerHeight = container.clientHeight - 40;
-
-  const scaleX = containerWidth / img.naturalWidth;
-  const scaleY = containerHeight / img.naturalHeight;
-
-  currentZoom = Math.min(scaleX, scaleY, 1.0); // nie powiększaj ponad 100%
-  applyZoom();
-}
-
-function applyZoom() {
-  const img = document.getElementById('previewImage');
-  img.style.transform = `scale(${currentZoom})`;
-
-  // Aktualizuj wskaźnik zoom
-  document.getElementById('zoomLevel').textContent = Math.round(currentZoom * 100) + '%';
-
-  // Zmień kursor w zależności od zoom
-  if (currentZoom > 1.0) {
-    img.style.cursor = 'grab';
-  } else {
-    img.style.cursor = 'default';
-  }
-}
-
-// Funkcja aktualizacji informacji o obrazie
-function updateImageInfo() {
-  const img = document.getElementById('previewImage');
-
-  // Wymiary obrazu
-  const dimensions = `${img.naturalWidth} × ${img.naturalHeight} px`;
-  document.getElementById('imageDimensions').textContent = dimensions;
-
-  // Rozmiar pliku (przybliżony na podstawie wymiarów)
-  const fileSizeKB = Math.round((img.naturalWidth * img.naturalHeight * 3) / 1024); // przybliżenie dla RGB
-  document.getElementById('imageSize').textContent = `~${fileSizeKB} KB`;
-}
-
-// Obsługa przeciągania obrazu przy zoom
 document.addEventListener('DOMContentLoaded', function() {
-  const container = document.querySelector('.image-container');
-  const img = document.getElementById('previewImage');
+  // Inicjalizuj DocumentPreview dla obrazu
+  try {
+    window.documentPreview = window.createImagePreview('imagePreviewContainer',
+      '{{ url_for("document_preview", doc_id=doc.id) }}',
+      {
+        filename: '{{ doc.original_filename }}',
+        docId: '{{ doc.id }}',
+        allowFullscreen: true,
+        allowZoom: true,
+        showToolbar: true,
+        downloadUrl: '{{ url_for("document_download", doc_id=doc.id) }}',
+        height: '75vh'
+      }
+    );
 
-  // Rozpoczęcie przeciągania
-  img.addEventListener('mousedown', function(e) {
-    if (currentZoom <= 1.0) return;
-
-    isDragging = true;
-    img.style.cursor = 'grabbing';
-
-    startX = e.pageX - container.offsetLeft;
-    startY = e.pageY - container.offsetTop;
-    scrollLeft = container.scrollLeft;
-    scrollTop = container.scrollTop;
-
-    e.preventDefault();
-  });
-
-  // Przeciąganie
-  container.addEventListener('mousemove', function(e) {
-    if (!isDragging) return;
-
-    e.preventDefault();
-    const x = e.pageX - container.offsetLeft;
-    const y = e.pageY - container.offsetTop;
-    const walkX = (x - startX) * 2;
-    const walkY = (y - startY) * 2;
-
-    container.scrollLeft = scrollLeft - walkX;
-    container.scrollTop = scrollTop - walkY;
-  });
-
-  // Zakończenie przeciągania
-  document.addEventListener('mouseup', function() {
-    if (isDragging) {
-      isDragging = false;
-      img.style.cursor = currentZoom > 1.0 ? 'grab' : 'default';
+    // Dodaj event listener dla aktualizacji wymiarów obrazu
+    if (window.documentPreview) {
+      // Spróbuj pobrać wymiary obrazu po załadowaniu
+      setTimeout(() => {
+        const img = document.querySelector('#imagePreviewContainer img');
+        if (img && img.complete) {
+          updateImageDimensions(img);
+        } else if (img) {
+          img.addEventListener('load', () => updateImageDimensions(img));
+        }
+      }, 1000);
     }
-  });
 
-  // Zoom scrollem myszy
-  container.addEventListener('wheel', function(e) {
-    e.preventDefault();
+  } catch (error) {
+    console.error('Błąd inicjalizacji DocumentPreview:', error);
 
-    if (e.deltaY < 0) {
-      zoomIn();
-    } else {
-      zoomOut();
-    }
-  });
-
-  // Dopasuj do ekranu przy załadowaniu
-  setTimeout(fitToScreen, 100);
-});
-
-// Obsługa klawiszy
-document.addEventListener('keydown', function(e) {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-  switch(e.key) {
-    case '+':
-    case '=':
-      e.preventDefault();
-      zoomIn();
-      break;
-    case '-':
-      e.preventDefault();
-      zoomOut();
-      break;
-    case '0':
-      e.preventDefault();
-      resetZoom();
-      break;
-    case 'f':
-    case 'F':
-      e.preventDefault();
-      fitToScreen();
-      break;
+    // Fallback - pokaż prostą wersję
+    document.getElementById('imagePreviewContainer').innerHTML = `
+      <div class="card">
+        <div class="card-body text-center">
+          <img src="{{ url_for('document_preview', doc_id=doc.id) }}"
+               class="img-fluid"
+               alt="Podgląd: {{ doc.original_filename }}"
+               style="max-height: 70vh; border-radius: 0.375rem;"
+               onload="updateImageDimensions(this)">
+        </div>
+      </div>
+    `;
   }
+
+  // Funkcja aktualizacji wymiarów obrazu
+  function updateImageDimensions(img) {
+    if (img && img.naturalWidth && img.naturalHeight) {
+      const dimensions = `${img.naturalWidth} × ${img.naturalHeight} px`;
+      const dimensionsElement = document.getElementById('imageDimensions');
+      if (dimensionsElement) {
+        dimensionsElement.textContent = dimensions;
+      }
+
+      // Przybliżony rozmiar pliku na podstawie wymiarów
+      const estimatedSize = Math.round((img.naturalWidth * img.naturalHeight * 3) / 1024);
+      console.log(`Obraz: ${dimensions}, przybliżony rozmiar: ~${estimatedSize} KB`);
+    }
+  }
+
+  // Dodatkowe skróty klawiszowe specyficzne dla obrazów
+  document.addEventListener('keydown', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    switch(e.key.toLowerCase()) {
+      case 'r':
+        if (e.ctrlKey && window.documentPreview && window.documentPreview.rotateImage) {
+          e.preventDefault();
+          window.documentPreview.rotateImage();
+        }
+        break;
+      case 'c':
+        if (e.ctrlKey && !window.getSelection().toString()) {
+          e.preventDefault();
+          copyImageToClipboard();
+        }
+        break;
+      case 'e':
+        if (!e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          window.location.href = '{{ url_for("document_image_viewer", doc_id=doc.id) }}';
+        }
+        break;
+    }
+  });
+
+  // Funkcja kopiowania obrazu do schowka (jeśli obsługiwane)
+  async function copyImageToClipboard() {
+    try {
+      const img = document.querySelector('#imagePreviewContainer img');
+      if (!img) return;
+
+      // Spróbuj skopiować URL obrazu
+      await window.clipboardManager.copyTextToClipboard(img.src);
+      window.alertManager.success('Link do obrazu skopiowany do schowka!', { duration: 3000 });
+    } catch (error) {
+      window.alertManager.info('Użyj prawego kliknięcia i "Kopiuj obraz" aby skopiować obraz', { duration: 5000 });
+    }
+  }
+
+  // Auto-refresh dla OCR w trakcie
+  {% if doc.ocr_status in ['pending', 'running'] %}
+  let refreshCount = 0;
+  const maxRefresh = 10;
+
+  const refreshInterval = setInterval(() => {
+    refreshCount++;
+
+    if (refreshCount >= maxRefresh) {
+      clearInterval(refreshInterval);
+      window.alertManager.warning('OCR trwa dłużej niż oczekiwano. Odśwież stronę aby sprawdzić status.');
+      return;
+    }
+
+    // Sprawdź status OCR przez API
+    window.apiClient.getOcrProgress('{{ doc.id }}')
+      .then(data => {
+        if (data.status === 'done') {
+          clearInterval(refreshInterval);
+          window.alertManager.success('OCR zakończony! Odświeżam stronę...', { duration: 3000 });
+          setTimeout(() => location.reload(), 3000);
+        } else if (data.status === 'fail') {
+          clearInterval(refreshInterval);
+          window.alertManager.error('OCR zakończony błędem.');
+        }
+      })
+      .catch(error => {
+        console.warn('Błąd sprawdzania statusu OCR:', error);
+      });
+  }, 5000); // Co 5 sekund
+  {% endif %}
 });
+
+// Funkcja globalna dla kompatybilności
+window.updateImageDimensions = function(img) {
+  if (img && img.naturalWidth && img.naturalHeight) {
+    const dimensions = `${img.naturalWidth} × ${img.naturalHeight} px`;
+    const dimensionsElement = document.getElementById('imageDimensions');
+    if (dimensionsElement) {
+      dimensionsElement.textContent = dimensions;
+    }
+  }
+};
 </script>
 
 <style>
-.image-container {
-  position: relative;
-  user-select: none;
+/* Lepsze stylowanie dla kontenerów */
+#imagePreviewContainer {
+  border: 1px solid #dee2e6;
+  border-radius: 0.375rem;
+  background-color: #f8f9fa;
+  overflow: hidden;
 }
 
-#previewImage {
-  transform-origin: center center;
+/* Responsywność */
+@media (max-width: 768px) {
+  #imagePreviewContainer {
+    height: 60vh !important;
+  }
+
+  .card-header .d-flex {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
 }
 
-.image-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
+/* Loading animation */
+.loading-image {
+  opacity: 0.7;
+  transition: opacity 0.3s ease;
 }
 
-/* Ukryj paski przewijania w kontenerze obrazu */
-.image-container::-webkit-scrollbar {
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  #imagePreviewContainer {
+    background-color: #2d3748 !important;
+    border-color: #4a5568;
+  }
+}
+
+/* Smooth transitions */
+#imagePreviewContainer img {
+  transition: transform 0.2s ease, opacity 0.3s ease;
+}
+
+/* Better scrollbars */
+#imagePreviewContainer::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-.image-container::-webkit-scrollbar-track {
+#imagePreviewContainer::-webkit-scrollbar-track {
   background: #f1f1f1;
   border-radius: 4px;
 }
 
-.image-container::-webkit-scrollbar-thumb {
+#imagePreviewContainer::-webkit-scrollbar-thumb {
   background: #c1c1c1;
   border-radius: 4px;
 }
 
-.image-container::-webkit-scrollbar-thumb:hover {
+#imagePreviewContainer::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
 }
 </style>

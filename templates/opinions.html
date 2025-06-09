@@ -1,10 +1,17 @@
-<!-- templates/opinions.html - FRAGMENT ZAKTUALIZOWANY -->
+<!-- templates/opinions.html - REFAKTORYZOWANA -->
 {% extends 'base.html' %}
 
-<!-- Breadcrumbs, page_title i page_actions są automatyczne z base.html -->
+{% set page_type = 'opinions_list' %}
+{% set page_title = 'Lista opinii sądowych' %}
 
-<!-- Dodatkowy kontekst dla filtrów i wyszukiwania -->
+{% set page_actions = [
+  {'name': 'Dodaj przez Word', 'url': url_for('upload_form'), 'icon': 'file-earmark-word', 'class': 'btn-primary'},
+  {'name': 'Utwórz pustą opinię', 'url': url_for('create_empty_opinion_form'), 'icon': 'plus-circle', 'class': 'btn-success'},
+  {'name': 'Szybki OCR', 'url': url_for('quick_ocr_form'), 'icon': 'lightning', 'class': 'btn-info'}
+] %}
+
 {% block content %}
+<!-- Alerty -->
 {% if request.query_params.get('delete_message') %}
 <div class="alert alert-success alert-dismissible fade show mb-4">
   <i class="bi bi-check-circle-fill me-2"></i> {{ request.query_params.get('delete_message') }}
@@ -18,11 +25,7 @@
 </div>
 {% endif %}
 
-<!-- div class="d-flex justify-content-between align-items-center mb-4">
-  <h2>Lista opinii sądowych</h2>
-/div -->
-
-<!-- Filtrowanie z checkboxami -->
+<!-- Filtrowanie opinii -->
 <div class="card mb-4">
   <div class="card-header bg-light">
     <h5 class="card-title mb-0">
@@ -30,7 +33,7 @@
     </h5>
   </div>
   <div class="card-body">
-    <form method="get" class="row g-3">
+    <form method="get" class="row g-3" id="opinionsFilterForm">
       <div class="col-md-6">
         <label class="form-label">Status opinii</label>
         <div class="d-flex flex-wrap gap-3">
@@ -107,10 +110,10 @@
           <a href="{{ url_for('list_opinions') }}" class="btn btn-outline-secondary">
             <i class="bi bi-x-circle me-1"></i> Resetuj filtry
           </a>
-          <button type="button" class="btn btn-outline-info" onclick="toggleAllFilters(true)">
+          <button type="button" class="btn btn-outline-info" id="selectAllBtn">
             <i class="bi bi-check-all me-1"></i> Zaznacz wszystkie
           </button>
-          <button type="button" class="btn btn-outline-warning" onclick="toggleAllFilters(false)">
+          <button type="button" class="btn btn-outline-warning" id="deselectAllBtn">
             <i class="bi bi-dash-square me-1"></i> Odznacz wszystkie
           </button>
         </div>
@@ -128,7 +131,7 @@
       </h5>
       <span class="badge bg-primary">
         {% if total_count %}
-          Wyświetlane: {{ total_count }} 
+          Wyświetlane: {{ total_count }}
           {% if current_filters.search or not (current_filters.k1 and current_filters.k2 and current_filters.k3 and current_filters.k4) %}
             (po filtrowaniu)
           {% endif %}
@@ -153,68 +156,66 @@
         </thead>
         <tbody>
           {% for opinion in opinions %}
-<tr data-href="{{ url_for('opinion_detail', doc_id=opinion.id) }}">
-  <td>
-    {% if opinion.sygnatura %}
-      <strong>{{ opinion.sygnatura }}</strong>
-    {% else %}
-      <span class="text-muted">Brak sygnatury</span>
-    {% endif %}
-  </td>
-  <td>{{ opinion.original_filename }}</td>
-  <td>
-    {% if opinion.note %}
-      <span class="text-muted">{{ opinion.note }}</span>
-    {% else %}
-      <span class="text-muted small"><em>Brak notatki</em></span>
-    {% endif %}
-    <button type="button" class="btn btn-sm btn-outline-secondary ms-2 py-0 px-1" 
-            data-doc-id="{{ opinion.id }}" 
-            data-bs-toggle="modal" 
-            data-bs-target="#noteEditModal"
-            onclick="event.stopPropagation()"
-            title="Edytuj notatkę">
-      <i class="bi bi-pencil-square"></i>
-    </button>
-    <!-- Ukryte pole zawierające treść notatki -->
-    <div id="note-content-{{ opinion.id }}" style="display: none;">{{ opinion.note|default('', true) }}</div>
-  </td>
-  <td class="text-center">
-    {% if opinion.step == 'k1' %}
-      <span class="badge bg-danger p-2">
-        <i class="bi bi-pencil-fill me-1"></i>{{ opinion.step }}
-      </span>
-    {% elif opinion.step == 'k2' %}
-      <span class="badge bg-warning p-2">
-        <i class="bi bi-journals me-1"></i>{{ opinion.step }}
-      </span>
-    {% elif opinion.step == 'k3' %}
-      <span class="badge bg-success p-2">
-        <i class="bi bi-check-circle-fill me-1"></i>{{ opinion.step }}
-      </span>
-    {% else %}
-      <span class="badge bg-secondary p-2">
-        <i class="bi bi-archive-fill me-1"></i>{{ opinion.step }}
-      </span>
-    {% endif %}
-  </td>
-  <td>{{ opinion.last_modified.strftime('%Y-%m-%d %H:%M') if opinion.last_modified else '-' }}</td>
-  <td class="text-center" onclick="event.stopPropagation();">
-    <div class="btn-group">
-      <a href="{{ url_for('document_download', doc_id=opinion.id) }}" 
-         class="btn btn-sm btn-outline-primary" 
-         title="Pobierz dokument opinii">
-        <i class="bi bi-download"></i>
-      </a>
-      <a href="#"
-        onclick="event.preventDefault(); event.stopPropagation(); quickPreview('{{ opinion.id }}', '{{ opinion.original_filename }}');"
-         class="btn btn-sm btn-outline-secondary"
-         title="Szybki podgląd">
-        <i class="bi bi-eye"></i>
-      </a>
-    </div>
-  </td>
-</tr>
+          <tr data-href="{{ url_for('opinion_detail', doc_id=opinion.id) }}">
+            <td>
+              {% if opinion.sygnatura %}
+                <strong>{{ opinion.sygnatura }}</strong>
+              {% else %}
+                <span class="text-muted">Brak sygnatury</span>
+              {% endif %}
+            </td>
+            <td>{{ opinion.original_filename }}</td>
+            <td>
+              {% if opinion.note %}
+                <span class="text-muted">{{ opinion.note }}</span>
+              {% else %}
+                <span class="text-muted small"><em>Brak notatki</em></span>
+              {% endif %}
+              <button type="button" class="btn btn-sm btn-outline-secondary ms-2 py-0 px-1 edit-note-btn"
+                      data-doc-id="{{ opinion.id }}"
+                      data-current-note="{{ opinion.note|default('', true) }}"
+                      onclick="event.stopPropagation()"
+                      title="Edytuj notatkę">
+                <i class="bi bi-pencil-square"></i>
+              </button>
+            </td>
+            <td class="text-center">
+              {% if opinion.step == 'k1' %}
+                <span class="badge bg-danger p-2">
+                  <i class="bi bi-pencil-fill me-1"></i>{{ opinion.step }}
+                </span>
+              {% elif opinion.step == 'k2' %}
+                <span class="badge bg-warning p-2">
+                  <i class="bi bi-journals me-1"></i>{{ opinion.step }}
+                </span>
+              {% elif opinion.step == 'k3' %}
+                <span class="badge bg-success p-2">
+                  <i class="bi bi-check-circle-fill me-1"></i>{{ opinion.step }}
+                </span>
+              {% else %}
+                <span class="badge bg-secondary p-2">
+                  <i class="bi bi-archive-fill me-1"></i>{{ opinion.step }}
+                </span>
+              {% endif %}
+            </td>
+            <td>{{ opinion.last_modified.strftime('%Y-%m-%d %H:%M') if opinion.last_modified else '-' }}</td>
+            <td class="text-center" onclick="event.stopPropagation();">
+              <div class="btn-group">
+                <a href="{{ url_for('document_download', doc_id=opinion.id) }}"
+                   class="btn btn-sm btn-outline-primary"
+                   title="Pobierz dokument opinii">
+                  <i class="bi bi-download"></i>
+                </a>
+                <button class="btn btn-sm btn-outline-secondary quick-preview-btn"
+                        data-doc-id="{{ opinion.id }}"
+                        data-doc-name="{{ opinion.original_filename }}"
+                        onclick="event.stopPropagation()"
+                        title="Szybki podgląd">
+                  <i class="bi bi-eye"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
           {% endfor %}
         </tbody>
       </table>
@@ -235,7 +236,7 @@
   </div>
 </div>
 
-<!-- Przyciski akcji -->
+<!-- Informacje o dodawaniu opinii -->
 <div class="card mt-4">
   <div class="card-header bg-light">
     <h5 class="card-title mb-0">
@@ -256,7 +257,7 @@
           </div>
         </div>
       </div>
-      
+
       <div class="col-md-4 mb-3">
         <div class="card h-100">
           <div class="card-body text-center">
@@ -269,7 +270,7 @@
           </div>
         </div>
       </div>
-      
+
       <div class="col-md-4 mb-3">
         <div class="card h-100">
           <div class="card-body text-center">
@@ -286,270 +287,98 @@
   </div>
 </div>
 
-
-<!-- Modal podglądu dokumentu -->
-<div class="modal fade" id="quickPreviewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="previewModalTitle">
-          <i class="bi bi-eye me-2"></i>Podgląd dokumentu
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body" id="previewModalBody" style="min-height: 500px; padding: 0;">
-        <div class="d-flex justify-content-center align-items-center" style="height: 500px;">
-          <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-            <span class="visually-hidden">Ładowanie...</span>
-          </div>
-          <span class="ms-3">Wczytywanie podglądu...</span>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <a href="#" class="btn btn-primary" id="previewModalLink">
-          <i class="bi bi-arrows-fullscreen me-1"></i>Otwórz pełny podgląd
-        </a>
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Zamknij</button>
-      </div>
-    </div>
-  </div>
-</div>
-<!-- Modal do edycji notatki -->
-<!-- Modal do edycji notatki -->
-<div class="modal fade" id="noteEditModal" tabindex="-1" aria-labelledby="noteEditModalLabel" aria-hidden="true">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="noteEditModalLabel">
-          <i class="bi bi-sticky-fill me-2"></i>Edycja notatki
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-<!-- Poprawiony formularz w modalu - z domyślną akcją i atrybutami -->
-<form id="noteForm" method="post" action="#" onsubmit="return prepareFormSubmit()">
-  <input type="hidden" id="noteDocId" name="doc_id" value="">
-  <div class="mb-3">
-    <label for="noteContent" class="form-label">Notatka do opinii</label>
-    <textarea class="form-control" id="noteContent" name="note" rows="5" 
-              placeholder="Wprowadź notatkę dotyczącą tej opinii..."></textarea>
-  </div>
-  <div class="d-flex justify-content-end">
-    <button type="button" class="btn btn-outline-secondary me-2" data-bs-dismiss="modal">Anuluj</button>
-    <button type="submit" class="btn btn-primary" >
-      <i class="bi bi-save me-1"></i>Zapisz notatkę
-    </button>
-  </div>
-</form>      
-
-
-      </div>
-    </div>
-  </div>
-</div>
-{% endblock %}
-{% block scripts %}
 <script>
-
-// Dodaj tę funkcję w bloku scripts w pliku opinions.html
 document.addEventListener('DOMContentLoaded', function() {
-  // Znajdź przycisk "Anuluj" w modalu notatek
-  const cancelButton = document.querySelector('#noteEditModal .btn-outline-secondary');
+  // Event listenery dla filtrów (podobnie jak w index.html)
 
-  if (cancelButton) {
-    cancelButton.addEventListener('click', function() {
-      // Jawnie zamknij modal za pomocą API Bootstrap
-      const noteModal = bootstrap.Modal.getInstance(document.getElementById('noteEditModal'));
-      if (noteModal) {
-        noteModal.hide();
-      }
-
-      // Upewnij się, że modal-backdrop jest usunięty
-      setTimeout(function() {
-        const modalBackdrops = document.querySelectorAll('.modal-backdrop');
-        modalBackdrops.forEach(function(backdrop) {
-          backdrop.remove();
-        });
-        document.body.classList.remove('modal-open');
-      }, 300); // Opóźnienie, aby dać czas na animację zamknięcia
-    });
-  }
-});
-
-function prepareFormSubmit() {
-  const docId = document.getElementById('noteDocId').value;
-console.log('Przygotowuję formularz dla docId: ' + docId);
-console.log('Bieżący URL: ' + window.location.href);
-console.log('Bieżąca ścieżka: ' + window.location.pathname);
-
-  if (!docId || docId === '0') {
-    alert('Błąd: nie można określić ID dokumentu');
-    return false;
-  }
-
-  // Jawnie ustaw absolutny URL, a nie relatywny
-  const form = document.getElementById('noteForm');
-  const base = window.location.origin; // np. "http://example.com"
-
-  // Sprawdź na jakiej stronie jesteśmy - bardziej niezawodna metoda
-  if (window.location.pathname.startsWith('/opinions') || window.location.pathname === '/') {
-    form.action = base + '/opinion/' + docId + '/update-note';
-    console.log('Wysyłam formularz do [opinions]: ' + form.action);
-  } else {
-    form.action = base + '/document/' + docId + '/update-note';
-    console.log('Wysyłam formularz do [document]: ' + form.action);
-  }
-
-  return true;
-}
-
-
-// Funkcja do zaznaczania/odznaczania wszystkich checkboxów
-function toggleAllFilters(state) {
-  const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
-  checkboxes.forEach(checkbox => {
-    checkbox.checked = state;
+  // Przyciski zaznacz/odznacz wszystkie
+  document.getElementById('selectAllBtn').addEventListener('click', function() {
+    const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
+    checkboxes.forEach(checkbox => checkbox.checked = true);
   });
-}
 
-// Automatyczne submitowanie formularza przy zmianie checkboxów
-document.addEventListener('DOMContentLoaded', function() {
-  const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
+  document.getElementById('deselectAllBtn').addEventListener('click', function() {
+    const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
+    checkboxes.forEach(checkbox => checkbox.checked = false);
+  });
+
+  // Auto-submit formularza przy zmianie filtrów
+  const form = document.getElementById('opinionsFilterForm');
+  const checkboxes = form.querySelectorAll('input[type="checkbox"][name^="k"]');
+  const searchContentCheckbox = form.querySelector('input[name="search_content"]');
+  const fuzzySearchCheckbox = form.querySelector('input[name="fuzzy_search"]');
 
   checkboxes.forEach(checkbox => {
     checkbox.addEventListener('change', function() {
-      // Krótkie opóźnienie aby user mógł zaznaczyć więcej checkboxów
       clearTimeout(window.filterTimeout);
-      window.filterTimeout = setTimeout(function() {
-        document.querySelector('form').submit();
-      }, 500);
+      window.filterTimeout = setTimeout(() => form.submit(), 500);
     });
   });
 
-  // Auto-submit dla checkboxów wyszukiwania
-  const searchContentCheckbox = document.querySelector('input[name="search_content"]');
-  const fuzzySearchCheckbox = document.querySelector('input[name="fuzzy_search"]');
-
   if (searchContentCheckbox) {
     searchContentCheckbox.addEventListener('change', function() {
-      const searchInput = document.querySelector('input[name="search"]');
+      const searchInput = form.querySelector('input[name="search"]');
       if (this.checked && searchInput.value.trim()) {
-        // Pokaż ostrzeżenie o potencjalnie wolnym wyszukiwaniu
         if (confirm('Wyszukiwanie w treści dokumentów może być wolne. Kontynuować?')) {
-          document.querySelector('form').submit();
+          form.submit();
         } else {
           this.checked = false;
         }
       } else if (!this.checked) {
-        // Jeśli odznaczamy, automatycznie przefiltruj
-        document.querySelector('form').submit();
+        form.submit();
       }
     });
   }
 
   if (fuzzySearchCheckbox) {
     fuzzySearchCheckbox.addEventListener('change', function() {
-      const searchInput = document.querySelector('input[name="search"]');
-      if (this.checked && searchInput.value.trim()) {
-        document.querySelector('form').submit();
-      } else if (!this.checked) {
-        document.querySelector('form').submit();
+      const searchInput = form.querySelector('input[name="search"]');
+      if (searchInput.value.trim()) {
+        form.submit();
       }
     });
   }
 
-  // Natychmiastowe submitowanie przy Enter w polu wyszukiwania
-  const searchInput = document.querySelector('input[name="search"]');
+  // Enter w polu wyszukiwania
+  const searchInput = form.querySelector('input[name="search"]');
   if (searchInput) {
     searchInput.addEventListener('keypress', function(e) {
       if (e.key === 'Enter') {
         e.preventDefault();
-        document.querySelector('form').submit();
+        form.submit();
       }
     });
   }
 
-  // Event listener dla przycisku edycji notatki
+  // Obsługa przycisków edycji notatki - używa modalManager
+  document.addEventListener('click', function(e) {
+    const editBtn = e.target.closest('.edit-note-btn');
+    if (!editBtn) return;
 
-document.querySelectorAll('[data-bs-target="#noteEditModal"]').forEach(function(button) {
-  button.addEventListener('click', function(event) {
-    event.preventDefault();
-    event.stopPropagation();
+    e.preventDefault();
+    e.stopPropagation();
 
-    const docId = this.getAttribute('data-doc-id');
-    console.log('Kliknięto przycisk edycji dla dokumentu ID: ' + docId); // Debugging
+    const docId = editBtn.getAttribute('data-doc-id');
+    const currentNote = editBtn.getAttribute('data-current-note');
 
-    const noteContent = document.getElementById('note-content-' + docId).textContent;
+    // Użyj nowego modalManager
+    window.modalManager.showNoteEdit(docId, currentNote, true); // true = isOpinion
+  });
 
-    document.getElementById('noteDocId').value = docId;
-    document.getElementById('noteContent').value = noteContent;
+  // Obsługa przycisków szybkiego podglądu - używa modalManager
+  document.addEventListener('click', function(e) {
+    const previewBtn = e.target.closest('.quick-preview-btn');
+    if (!previewBtn) return;
 
-    // Ustaw wartość akcji formularza, ale nie polegaj wyłącznie na tym
-    document.getElementById('noteForm').action = '/document/' + docId + '/update-note';
+    e.preventDefault();
+    e.stopPropagation();
 
-    // Ręczne otwieranie modala (zapasowo, gdyby data-bs-* nie działały)
-    const modal = new bootstrap.Modal(document.getElementById('noteEditModal'));
-    modal.show();
+    const docId = previewBtn.getAttribute('data-doc-id');
+    const docName = previewBtn.getAttribute('data-doc-name');
+
+    // Użyj nowego modalManager
+    window.modalManager.showDocumentPreview(docId, docName);
   });
 });
-
-console.log('Debug: inicjalizacja zakończona');
-
-// Dodaj tymczasowy przycisk testowy, aby sprawdzić czy wszystko działa
-document.body.addEventListener('keydown', function(e) {
-  if (e.ctrlKey && e.key === 'd') { // Ctrl+D wyświetli info debugowania
-    const ids = [];
-    document.querySelectorAll('[data-doc-id]').forEach(el => {
-      ids.push(el.getAttribute('data-doc-id'));
-    });
-    console.log('Dostępne dokumenty: ' + ids.join(', '));
-    alert('Informacje debugowania wyświetlone w konsoli przeglądarki');
-  }
-
-});
-});
-
-// Funkcja do szybkiego podglądu dokumentu
-function quickPreview(docId, docName) {
-  // Ustaw tytuł modalu
-  document.getElementById('previewModalTitle').innerHTML = `<i class="bi bi-eye me-2"></i>${docName}`;
-
-  // Ustaw link do pełnego podglądu
-  document.getElementById('previewModalLink').href = `/opinion/${docId}`;
-
-  // Pokaż spinner ładowania
-  document.getElementById('previewModalBody').innerHTML = `
-    <div class="d-flex justify-content-center align-items-center" style="height: 500px;">
-      <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-        <span class="visually-hidden">Ładowanie...</span>
-      </div>
-      <span class="ms-3">Wczytywanie podglądu...</span>
-    </div>
-  `;
-
-  // Otwórz modal
-  const modal = new bootstrap.Modal(document.getElementById('quickPreviewModal'));
-  modal.show();
-
-  // Pobierz zawartość podglądu
-  fetch(`/document/${docId}/preview-content`)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error('Błąd podczas ładowania podglądu');
-      }
-      return response.text();
-    })
-    .then(html => {
-      document.getElementById('previewModalBody').innerHTML = html;
-    })
-    .catch(error => {
-      document.getElementById('previewModalBody').innerHTML = `
-        <div class="alert alert-danger m-3">
-          <i class="bi bi-exclamation-triangle-fill me-2"></i>
-          <strong>Błąd!</strong> Nie udało się załadować podglądu: ${error.message}
-        </div>
-      `;
-    });
-}
 </script>
 {% endblock %}

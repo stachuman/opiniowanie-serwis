@@ -1,16 +1,14 @@
-<!-- templates/document_summarize.html -->
+<!-- templates/document_summarize.html - REFAKTORYZOWANA -->
 {% extends 'base.html' %}
+
+{% set page_type = 'document_detail' %}
+{% set page_title = 'Generowanie podsumowania dokumentu' %}
+
+{% set page_actions = [
+  {'name': 'Powrót do dokumentu', 'url': url_for('document_detail', doc_id=doc.id), 'icon': 'arrow-left', 'class': 'btn-outline-secondary'}
+] %}
+
 {% block content %}
-
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h2>Generowanie podsumowania dokumentu</h2>
-  <div>
-    <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="btn btn-outline-secondary">
-      <i class="bi bi-arrow-left"></i> Powrót do dokumentu
-    </a>
-  </div>
-</div>
-
 <!-- Informacje o dokumencie -->
 <div class="card mb-4">
   <div class="card-header bg-light">
@@ -38,7 +36,7 @@
     <h5 class="card-title mb-0">
       <i class="bi bi-robot me-2"></i>Konfiguracja podsumowania
     </h5>
-    <button type="button" class="btn btn-sm btn-outline-info" onclick="testLLMConnection()">
+    <button type="button" class="btn btn-sm btn-outline-info" id="testLlmBtn">
       <i class="bi bi-wifi"></i> Test połączenia z LLM
     </button>
   </div>
@@ -48,25 +46,25 @@
         <label for="customInstruction" class="form-label">
           Instrukcja dla LLM <small class="text-muted">(opcjonalna - pozostaw puste aby użyć domyślnej)</small>
         </label>
-        <textarea class="form-control" id="customInstruction" name="custom_instruction" rows="8" 
+        <textarea class="form-control" id="customInstruction" name="custom_instruction" rows="8"
                   placeholder="Wprowadź własną instrukcję dla LLM lub pozostaw puste aby użyć domyślnej..."></textarea>
         <div class="form-text">
           <strong>Domyślna instrukcja:</strong> Przeanalizuje dokument i przygotuje zwięzłe podsumowanie z główną tematyką, kluczowymi informacjami i wnioskami.
         </div>
       </div>
-      
+
       <div class="mb-3">
         <div class="d-flex gap-2">
-          <button type="button" class="btn btn-outline-secondary" onclick="loadDefaultInstruction()">
+          <button type="button" class="btn btn-outline-secondary" id="loadDefaultBtn">
             <i class="bi bi-arrow-clockwise"></i> Użyj domyślnej instrukcji
           </button>
-          <button type="button" class="btn btn-outline-info" onclick="showInstructionExamples()">
+          <button type="button" class="btn btn-outline-info" id="showExamplesBtn">
             <i class="bi bi-lightbulb"></i> Przykłady instrukcji
           </button>
         </div>
       </div>
-      
-      <!-- NOWA SEKCJA: Opcje zapisu do notatki -->
+
+      <!-- Opcje zapisu do notatki -->
       <div class="card bg-light mb-3">
         <div class="card-body">
           <div class="form-check mb-3">
@@ -75,7 +73,7 @@
               <strong>Zapisz podsumowanie do notatki dokumentu</strong>
             </label>
           </div>
-          
+
           <div id="noteOptions" class="ms-4">
             <div class="mb-2">
               <strong>Tryb zapisu:</strong>
@@ -98,7 +96,7 @@
                 <strong>Zastąp całą notatkę</strong> podsumowaniem
               </label>
             </div>
-            
+
             {% if current_note %}
             <div class="alert alert-info mt-2">
               <i class="bi bi-info-circle me-1"></i>
@@ -112,7 +110,7 @@
           </div>
         </div>
       </div>
-      
+
       <div class="d-flex justify-content-end">
         <button type="submit" class="btn btn-primary" id="generateBtn">
           <i class="bi bi-magic"></i> Generuj podsumowanie
@@ -133,10 +131,10 @@
     <div class="card-body">
       <div id="summaryContent" class="mb-3"></div>
       <div class="d-flex justify-content-end gap-2">
-        <button type="button" class="btn btn-outline-secondary" onclick="copySummaryToClipboard()">
+        <button type="button" class="btn btn-outline-secondary" id="copySummaryBtn">
           <i class="bi bi-clipboard"></i> Kopiuj do schowka
         </button>
-        <button type="button" class="btn btn-outline-primary" onclick="generateAnother()">
+        <button type="button" class="btn btn-outline-primary" id="generateAnotherBtn">
           <i class="bi bi-arrow-repeat"></i> Generuj ponownie
         </button>
       </div>
@@ -154,7 +152,7 @@
       <h5>Generowanie podsumowania...</h5>
       <p class="text-muted">LLM analizuje dokument. To może potrwać od kilku sekund do 2 minut.</p>
       <div class="progress mt-3" style="height: 20px;">
-        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+        <div class="progress-bar progress-bar-striped progress-bar-animated"
              role="progressbar" style="width: 100%"></div>
       </div>
     </div>
@@ -171,105 +169,28 @@
     </div>
     <div class="card-body">
       <div id="errorContent" class="mb-3"></div>
-      <button type="button" class="btn btn-outline-danger" onclick="retryGeneration()">
+      <button type="button" class="btn btn-outline-danger" id="retryBtn">
         <i class="bi bi-arrow-repeat"></i> Spróbuj ponownie
       </button>
     </div>
   </div>
 </div>
 
-<!-- Modal z przykładami instrukcji -->
-<div class="modal fade" id="examplesModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">
-          <i class="bi bi-lightbulb me-2"></i>Przykłady instrukcji dla LLM
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="accordion" id="examplesAccordion">
-          <div class="accordion-item">
-            <h2 class="accordion-header">
-              <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#example1">
-                Podsumowanie medyczne
-              </button>
-            </h2>
-            <div id="example1" class="accordion-collapse collapse show">
-              <div class="accordion-body">
-                <pre class="bg-light p-3 rounded"><code>Przeanalizuj ten dokument medyczny i przygotuj strukturalne podsumowanie:
-
-1. **Dane pacjenta** - podstawowe informacje
-2. **Rozpoznanie** - główna diagnoza i kody ICD
-3. **Objawy i dolegliwości** - zgłaszane problemy
-4. **Badania** - wykonane badania i ich wyniki
-5. **Leczenie** - zalecenia i przepisane leki
-6. **Rokowania** - przewidywany przebieg leczenia
-
-Zachowaj medyczną terminologię i podaj konkretne daty.</code></pre>
-                <button class="btn btn-sm btn-outline-primary" onclick="useExample(1)">Użyj tej instrukcji</button>
-              </div>
-            </div>
-          </div>
-          
-          <div class="accordion-item">
-            <h2 class="accordion-header">
-              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#example2">
-                Analiza prawna
-              </button>
-            </h2>
-            <div id="example2" class="accordion-collapse collapse">
-              <div class="accordion-body">
-                <pre class="bg-light p-3 rounded"><code>Przeprowadź analizę prawną tego dokumentu:
-
-1. **Charakter dokumentu** - rodzaj pisma prawnego
-2. **Strony postępowania** - podmioty uczestniczące
-3. **Przedmiot sprawy** - czego dotyczy sprawa
-4. **Podstawy prawne** - przywołane przepisy i artykuły
-5. **Kluczowe ustalenia** - istotne fakty i dowody
-6. **Wnioski** - podsumowanie stanowiska lub decyzji
-
-Skup się na aspektach merytorycznych i prawnych.</code></pre>
-                <button class="btn btn-sm btn-outline-primary" onclick="useExample(2)">Użyj tej instrukcji</button>
-              </div>
-            </div>
-          </div>
-          
-          <div class="accordion-item">
-            <h2 class="accordion-header">
-              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#example3">
-                Streszczenie ogólne
-              </button>
-            </h2>
-            <div id="example3" class="accordion-collapse collapse">
-              <div class="accordion-body">
-                <pre class="bg-light p-3 rounded"><code>Przygotuj zwięzłe streszczenie tego dokumentu w formie punktów:
-
-• **Główna tematyka** - w 1-2 zdaniach
-• **Kluczowe informacje** - najważniejsze fakty
-• **Daty i osoby** - istotne terminy i podmioty
-• **Działania i decyzje** - co zostało ustalone
-• **Następne kroki** - jeśli są wskazane
-
-Maksymalnie 200 słów, język jasny i zrozumiały.</code></pre>
-                <button class="btn btn-sm btn-outline-primary" onclick="useExample(3)">Użyj tej instrukcji</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <script>
-// Domyślna instrukcja
-const defaultInstruction = `{{ default_instruction|safe }}`;
+// Inicjalizacja po załadowaniu DOM
+document.addEventListener('DOMContentLoaded', function() {
+  // Inicjalizuj manager dokumentu
+  window.documentDetailManager = new DocumentDetailManager('{{ doc.id }}', {
+    hasOcr: {{ 'true' if doc.ocr_status == 'done' else 'false' }},
+    ocrStatus: '{{ doc.ocr_status or "none" }}'
+  });
 
-// Przykłady instrukcji
-const examples = {
-  1: `Przeanalizuj ten dokument medyczny i przygotuj strukturalne podsumowanie:
+  // Domyślna instrukcja
+  const defaultInstruction = `{{ default_instruction|safe }}`;
+
+  // Przykłady instrukcji
+  const instructionExamples = {
+    medical: `Przeanalizuj ten dokument medyczny i przygotuj strukturalne podsumowanie:
 
 1. **Dane pacjenta** - podstawowe informacje
 2. **Rozpoznanie** - główna diagnoza i kody ICD
@@ -279,8 +200,8 @@ const examples = {
 6. **Rokowania** - przewidywany przebieg leczenia
 
 Zachowaj medyczną terminologię i podaj konkretne daty.`,
-  
-  2: `Przeprowadź analizę prawną tego dokumentu:
+
+    legal: `Przeprowadź analizę prawną tego dokumentu:
 
 1. **Charakter dokumentu** - rodzaj pisma prawnego
 2. **Strony postępowania** - podmioty uczestniczące
@@ -290,8 +211,8 @@ Zachowaj medyczną terminologię i podaj konkretne daty.`,
 6. **Wnioski** - podsumowanie stanowiska lub decyzji
 
 Skup się na aspektach merytorycznych i prawnych.`,
-  
-  3: `Przygotuj zwięzłe streszczenie tego dokumentu w formie punktów:
+
+    general: `Przygotuj zwięzłe streszczenie tego dokumentu w formie punktów:
 
 • **Główna tematyka** - w 1-2 zdaniach
 • **Kluczowe informacje** - najważniejsze fakty
@@ -300,156 +221,208 @@ Skup się na aspektach merytorycznych i prawnych.`,
 • **Następne kroki** - jeśli są wskazane
 
 Maksymalnie 200 słów, język jasny i zrozumiały.`
-};
+  };
 
-// Obsługa formularza
-document.getElementById('summarizeForm').addEventListener('submit', async function(e) {
-  e.preventDefault();
-  
-  const customInstruction = document.getElementById('customInstruction').value;
-  const saveToNote = document.getElementById('saveToNote').checked;
-  const noteMode = document.querySelector('input[name="note_mode"]:checked').value;
-  const generateBtn = document.getElementById('generateBtn');
-  
-  // Pokaż loading, ukryj inne sekcje
-  showLoadingArea();
-  
-  // Wyłącz przycisk
-  generateBtn.disabled = true;
-  generateBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Generowanie...';
-  
-  try {
-    const formData = new FormData();
-    if (customInstruction.trim()) {
-      formData.append('custom_instruction', customInstruction);
+  // Event listenery
+  document.getElementById('testLlmBtn').addEventListener('click', testLlmConnection);
+  document.getElementById('loadDefaultBtn').addEventListener('click', () => loadInstruction(defaultInstruction));
+  document.getElementById('showExamplesBtn').addEventListener('click', showInstructionExamples);
+  document.getElementById('summarizeForm').addEventListener('submit', handleFormSubmit);
+  document.getElementById('copySummaryBtn').addEventListener('click', copySummaryToClipboard);
+  document.getElementById('generateAnotherBtn').addEventListener('click', generateAnother);
+  document.getElementById('retryBtn').addEventListener('click', retryGeneration);
+
+  // Obsługa checkbox "Zapisz do notatki"
+  document.getElementById('saveToNote').addEventListener('change', function() {
+    const noteOptions = document.getElementById('noteOptions');
+    noteOptions.style.display = this.checked ? 'block' : 'none';
+  });
+
+  // Funkcje pomocnicze
+  async function testLlmConnection() {
+    try {
+      const result = await window.apiClient.testLlmConnection();
+      if (result.success) {
+        window.alertManager.success('✅ Połączenie z LLM działa poprawnie!');
+      } else {
+        window.alertManager.error(`❌ Błąd połączenia z LLM: ${result.error}`);
+      }
+    } catch (error) {
+      window.alertManager.error(`❌ Błąd testowania połączenia: ${error.message}`);
     }
-    formData.append('save_to_note', saveToNote);
-    formData.append('note_mode', noteMode);
-    
-    const response = await fetch(`/document/{{ doc.id }}/summarize`, {
-      method: 'POST',
-      body: formData
-    });
-    
-    const result = await response.json();
-    
-    if (result.success) {
-      showResults(result.summary, result.saved_to_note);
-    } else {
-      showError(result.error);
-    }
-    
-  } catch (error) {
-    showError(`Błąd komunikacji: ${error.message}`);
-  } finally {
-    // Przywróć przycisk
-    generateBtn.disabled = false;
-    generateBtn.innerHTML = '<i class="bi bi-magic"></i> Generuj podsumowanie';
   }
-});
 
-// Obsługa checkbox "Zapisz do notatki"
-document.getElementById('saveToNote').addEventListener('change', function() {
-  const noteOptions = document.getElementById('noteOptions');
-  if (this.checked) {
-    noteOptions.style.display = 'block';
-  } else {
-    noteOptions.style.display = 'none';
+  function loadInstruction(instruction) {
+    document.getElementById('customInstruction').value = instruction;
   }
-});
 
-function showLoadingArea() {
-  document.getElementById('loadingArea').style.display = 'block';
-  document.getElementById('resultsArea').style.display = 'none';
-  document.getElementById('errorArea').style.display = 'none';
-}
+  function showInstructionExamples() {
+    const modalBody = `
+      <div class="accordion" id="examplesAccordion">
+        <div class="accordion-item">
+          <h2 class="accordion-header">
+            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#example1">
+              Podsumowanie medyczne
+            </button>
+          </h2>
+          <div id="example1" class="accordion-collapse collapse show">
+            <div class="accordion-body">
+              <pre class="bg-light p-3 rounded"><code>${instructionExamples.medical}</code></pre>
+              <button class="btn btn-sm btn-outline-primary" onclick="useExample('medical')">Użyj tej instrukcji</button>
+            </div>
+          </div>
+        </div>
 
-function showResults(summary, savedToNote) {
-  document.getElementById('resultsArea').style.display = 'block';
-  document.getElementById('loadingArea').style.display = 'none';
-  document.getElementById('errorArea').style.display = 'none';
-  
-  // Formatuj podsumowanie (zamień nowe linie na <br>)
-  const formattedSummary = summary.replace(/\n/g, '<br>');
-  
-  let resultHtml = `<div class="summary-text">${formattedSummary}</div>`;
-  
-  // Jeśli zapisano do notatki, pokaż informację
-  if (savedToNote) {
-    resultHtml += `
-      <div class="alert alert-success mt-3">
-        <i class="bi bi-check-circle me-2"></i>
-        <strong>Podsumowanie zostało zapisane do notatki dokumentu!</strong>
-        <div class="mt-2">
-          <a href="/document/{{ doc.id }}" class="btn btn-sm btn-outline-success me-2">
-            <i class="bi bi-eye"></i> Zobacz dokument
-          </a>
-          {% if doc.parent_id %}
-          <a href="/opinion/{{ doc.parent_id }}" class="btn btn-sm btn-outline-primary">
-            <i class="bi bi-arrow-left"></i> Powrót do opinii
-          </a>
-          {% endif %}
+        <div class="accordion-item">
+          <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#example2">
+              Analiza prawna
+            </button>
+          </h2>
+          <div id="example2" class="accordion-collapse collapse">
+            <div class="accordion-body">
+              <pre class="bg-light p-3 rounded"><code>${instructionExamples.legal}</code></pre>
+              <button class="btn btn-sm btn-outline-primary" onclick="useExample('legal')">Użyj tej instrukcji</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#example3">
+              Streszczenie ogólne
+            </button>
+          </h2>
+          <div id="example3" class="accordion-collapse collapse">
+            <div class="accordion-body">
+              <pre class="bg-light p-3 rounded"><code>${instructionExamples.general}</code></pre>
+              <button class="btn btn-sm btn-outline-primary" onclick="useExample('general')">Użyj tej instrukcji</button>
+            </div>
+          </div>
         </div>
       </div>
     `;
+
+    const modal = window.modalManager.create('examplesModal', {
+      title: '<i class="bi bi-lightbulb me-2"></i>Przykłady instrukcji dla LLM',
+      body: modalBody,
+      size: 'lg',
+      autoDestroy: true
+    });
+
+    modal.show();
+
+    // Funkcja globalna do używania przykładów
+    window.useExample = function(type) {
+      document.getElementById('customInstruction').value = instructionExamples[type];
+      window.modalManager.hide('examplesModal');
+    };
   }
-  
-  document.getElementById('summaryContent').innerHTML = resultHtml;
-}
 
-function showError(errorMessage) {
-  document.getElementById('errorArea').style.display = 'block';
-  document.getElementById('loadingArea').style.display = 'none';
-  document.getElementById('resultsArea').style.display = 'none';
-  
-  document.getElementById('errorContent').innerHTML = `<div class="alert alert-danger">${errorMessage}</div>`;
-}
+  async function handleFormSubmit(e) {
+    e.preventDefault();
 
-function loadDefaultInstruction() {
-  document.getElementById('customInstruction').value = defaultInstruction;
-}
+    const customInstruction = document.getElementById('customInstruction').value;
+    const saveToNote = document.getElementById('saveToNote').checked;
+    const noteMode = document.querySelector('input[name="note_mode"]:checked').value;
+    const generateBtn = document.getElementById('generateBtn');
 
-function showInstructionExamples() {
-  new bootstrap.Modal(document.getElementById('examplesModal')).show();
-}
+    // Pokaż loading
+    showUI('loading');
 
-function useExample(exampleNumber) {
-  document.getElementById('customInstruction').value = examples[exampleNumber];
-  bootstrap.Modal.getInstance(document.getElementById('examplesModal')).hide();
-}
+    // Wyłącz przycisk
+    generateBtn.disabled = true;
+    generateBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Generowanie...';
 
-function copySummaryToClipboard() {
-  const summaryText = document.getElementById('summaryContent').innerText;
-  navigator.clipboard.writeText(summaryText).then(() => {
-    // Pokaż toast lub alert
-    alert('Podsumowanie zostało skopiowane do schowka!');
-  });
-}
+    try {
+      const result = await window.apiClient.generateDocumentSummary('{{ doc.id }}', {
+        customInstruction: customInstruction.trim() || null,
+        saveToNote: saveToNote,
+        noteMode: noteMode
+      });
 
-function generateAnother() {
-  document.getElementById('resultsArea').style.display = 'none';
-  document.getElementById('errorArea').style.display = 'none';
-}
+      if (result.success) {
+        showResults(result.summary, result.saved_to_note);
+      } else {
+        showError(result.error);
+      }
 
-function retryGeneration() {
-  document.getElementById('errorArea').style.display = 'none';
-  document.getElementById('summarizeForm').dispatchEvent(new Event('submit'));
-}
-
-async function testLLMConnection() {
-  try {
-    const response = await fetch('/api/llm/test-connection');
-    const result = await response.json();
-    
-    if (result.success) {
-      alert('✅ Połączenie z LLM działa poprawnie!');
-    } else {
-      alert(`❌ Błąd połączenia z LLM: ${result.error}`);
+    } catch (error) {
+      showError(`Błąd komunikacji: ${error.message}`);
+    } finally {
+      // Przywróć przycisk
+      generateBtn.disabled = false;
+      generateBtn.innerHTML = '<i class="bi bi-magic"></i> Generuj podsumowanie';
     }
-  } catch (error) {
-    alert(`❌ Błąd testowania połączenia: ${error.message}`);
   }
-}
+
+  function showUI(mode) {
+    const areas = ['loadingArea', 'resultsArea', 'errorArea'];
+    areas.forEach(areaId => {
+      document.getElementById(areaId).style.display = 'none';
+    });
+
+    if (mode && document.getElementById(mode + 'Area')) {
+      document.getElementById(mode + 'Area').style.display = 'block';
+    }
+  }
+
+  function showResults(summary, savedToNote) {
+    showUI('results');
+
+    // Formatuj podsumowanie (zamień nowe linie na <br>)
+    const formattedSummary = summary.replace(/\n/g, '<br>');
+
+    let resultHtml = `<div class="summary-text">${formattedSummary}</div>`;
+
+    // Jeśli zapisano do notatki, pokaż informację
+    if (savedToNote) {
+      resultHtml += `
+        <div class="alert alert-success mt-3">
+          <i class="bi bi-check-circle me-2"></i>
+          <strong>Podsumowanie zostało zapisane do notatki dokumentu!</strong>
+          <div class="mt-2">
+            <a href="/document/{{ doc.id }}" class="btn btn-sm btn-outline-success me-2">
+              <i class="bi bi-eye"></i> Zobacz dokument
+            </a>
+            {% if doc.parent_id %}
+            <a href="/opinion/{{ doc.parent_id }}" class="btn btn-sm btn-outline-primary">
+              <i class="bi bi-arrow-left"></i> Powrót do opinii
+            </a>
+            {% endif %}
+          </div>
+        </div>
+      `;
+    }
+
+    document.getElementById('summaryContent').innerHTML = resultHtml;
+  }
+
+  function showError(errorMessage) {
+    showUI('error');
+    document.getElementById('errorContent').innerHTML = `<div class="alert alert-danger">${errorMessage}</div>`;
+  }
+
+  async function copySummaryToClipboard() {
+    const summaryText = document.getElementById('summaryContent').innerText;
+
+    try {
+      await window.clipboardManager.copyTextToClipboard(summaryText);
+      window.alertManager.success('Podsumowanie zostało skopiowane do schowka!', { duration: 3000 });
+    } catch (error) {
+      window.alertManager.error('Nie udało się skopiować do schowka: ' + error.message);
+    }
+  }
+
+  function generateAnother() {
+    showUI();
+  }
+
+  function retryGeneration() {
+    showUI();
+    document.getElementById('summarizeForm').dispatchEvent(new Event('submit'));
+  }
+});
 </script>
 
 <style>
@@ -462,5 +435,4 @@ async function testLLMConnection() {
   border-left: 4px solid #28a745;
 }
 </style>
-
 {% endblock %}

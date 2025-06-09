@@ -1,61 +1,42 @@
-<!-- templates/pdf_preview.html -->
+<!-- templates/pdf_preview.html - REFAKTORYZOWANA -->
 {% extends 'base.html' %}
 
+{# Ustawienia dla base.html - POPRAWKA #}
+{% set page_type = 'pdf_preview' %}
+{# USUNIĘTE: ręczne page_actions - przychodzą z navigation.py #}
+
 {% block content %}
+<!-- Podgląd PDF -->
 <div class="card">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <h5 class="mb-0">
-      <i class="bi bi-file-earmark-pdf text-danger me-2"></i>
-      Podgląd PDF: {{ doc.original_filename }}
-    </h5>
-    <div class="btn-group">
-      <!-- Przyciski akcji -->
-      <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="btn btn-sm btn-outline-secondary">
-        <i class="bi bi-arrow-left"></i> Szczegóły
-      </a>
-      <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary">
-        <i class="bi bi-download"></i> Pobierz
-      </a>
-      <a href="{{ url_for('document_pdf_viewer', doc_id=doc.id) }}" class="btn btn-sm btn-outline-success">
-        <i class="bi bi-search"></i> Zaawansowany podgląd z OCR
-      </a>
+  <div class="card-header bg-light">
+    <div class="d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">
+        <i class="bi bi-file-earmark-pdf text-danger me-2"></i>
+        Podgląd PDF
+      </h5>
+      <div class="btn-group btn-group-sm">
+        <button type="button" class="btn btn-outline-secondary" id="fullscreenBtn">
+          <i class="bi bi-arrows-fullscreen"></i> Pełny ekran
+        </button>
+        <button type="button" class="btn btn-outline-secondary" id="printBtn">
+          <i class="bi bi-printer"></i> Drukuj
+        </button>
+        <span class="badge bg-info ms-2" id="pdfStatus">Ładowanie PDF...</span>
+      </div>
     </div>
   </div>
 
   <div class="card-body p-0">
-    <!-- Narzędzia PDF -->
-    <div class="pdf-toolbar p-2 bg-light border-bottom d-flex justify-content-between align-items-center">
-      <div class="btn-group btn-group-sm">
-        <button type="button" class="btn btn-outline-secondary" onclick="toggleFullscreen()">
-          <i class="bi bi-arrows-fullscreen"></i> Pełny ekran
-        </button>
-        <button type="button" class="btn btn-outline-secondary" onclick="printPdf()">
-          <i class="bi bi-printer"></i> Drukuj
-        </button>
-      </div>
-
-      <div class="d-flex align-items-center">
-        <span class="badge bg-info me-2" id="pdfStatus">Ładowanie PDF...</span>
-        {% if doc.ocr_status == 'done' %}
-          <span class="badge bg-success">
-            <i class="bi bi-check-circle me-1"></i>OCR dostępny
-          </span>
-        {% endif %}
-      </div>
-    </div>
-
     <!-- Kontener PDF -->
-    <div class="pdf-container" style="height: 75vh; width: 100%; position: relative;">
+    <div id="pdfContainer" class="pdf-container" style="height: 75vh; width: 100%; position: relative; background-color: #f8f9fa;">
       <iframe id="pdfFrame"
               src="{{ url_for('document_preview', doc_id=doc.id) }}"
               width="100%"
               height="100%"
-              style="border: none;"
-              onload="updatePdfStatus('Gotowe')"
-              onerror="updatePdfStatus('Błąd ładowania')">
+              style="border: none; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);">
         <!-- Fallback dla starszych przeglądarek -->
         <div class="d-flex justify-content-center align-items-center h-100">
-          <div class="text-center">
+          <div class="text-center p-5">
             <i class="bi bi-file-earmark-pdf" style="font-size: 4rem; color: #dc3545;"></i>
             <h5 class="mt-3">Twoja przeglądarka nie obsługuje wyświetlania PDF</h5>
             <p class="text-muted">Kliknij poniżej, aby pobrać plik.</p>
@@ -66,40 +47,40 @@
         </div>
       </iframe>
     </div>
-
-    <!-- Informacja o OCR -->
-    {% if doc.ocr_status == 'done' %}
-    <div class="alert alert-success m-3">
-      <i class="bi bi-check-circle me-2"></i>
-      <strong>OCR zakończony!</strong>
-      Tekst został rozpoznany z tego PDF.
-      <a href="{{ url_for('document_pdf_viewer', doc_id=doc.id) }}" class="alert-link">
-        Użyj zaawansowanego podglądu
-      </a>
-      aby zobaczyć rozpoznany tekst i zaznaczać fragmenty na poszczególnych stronach.
-    </div>
-    {% elif doc.ocr_status == 'none' %}
-    <div class="alert alert-info m-3">
-      <i class="bi bi-info-circle me-2"></i>
-      <strong>OCR nie został uruchomiony.</strong>
-      Możesz uruchomić rozpoznawanie tekstu w
-      <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="alert-link">szczegółach dokumentu</a>.
-    </div>
-    {% elif doc.ocr_status in ['pending', 'running'] %}
-    <div class="alert alert-warning m-3">
-      <i class="bi bi-hourglass-split me-2"></i>
-      <strong>OCR w trakcie przetwarzania...</strong>
-      Rozpoznawanie tekstu z tego PDF jest obecnie wykonywane.
-    </div>
-    {% endif %}
   </div>
 </div>
 
-<!-- Informacje o PDF -->
+<!-- OCR Status Info -->
+{% if doc.ocr_status == 'done' %}
+<div class="alert alert-success">
+  <i class="bi bi-check-circle me-2"></i>
+  <strong>OCR zakończony!</strong>
+  Tekst został rozpoznany z tego PDF.
+  <a href="{{ url_for('document_pdf_viewer', doc_id=doc.id) }}" class="alert-link">
+    Użyj zaawansowanego podglądu
+  </a>
+  aby zobaczyć rozpoznany tekst i zaznaczać fragmenty na poszczególnych stronach.
+</div>
+{% elif doc.ocr_status == 'none' %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-2"></i>
+  <strong>OCR nie został uruchomiony.</strong>
+  Możesz uruchomić rozpoznawanie tekstu w
+  <a href="{{ url_for('document_detail', doc_id=doc.id) }}" class="alert-link">szczegółach dokumentu</a>.
+</div>
+{% elif doc.ocr_status in ['pending', 'running'] %}
+<div class="alert alert-warning">
+  <i class="bi bi-hourglass-split me-2"></i>
+  <strong>OCR w trakcie przetwarzania...</strong>
+  Rozpoznawanie tekstu z tego PDF jest obecnie wykonywane.
+</div>
+{% endif %}
+
+<!-- Szczegółowe informacje o dokumencie -->
 <div class="card mt-3">
   <div class="card-header">
     <h6 class="mb-0">
-      <i class="bi bi-info-circle me-2"></i>Informacje o dokumencie PDF
+      <i class="bi bi-info-circle me-2"></i>Szczegółowe informacje o dokumencie
     </h6>
   </div>
   <div class="card-body">
@@ -119,21 +100,10 @@
           {% if doc.last_modified %}
           <li><strong>Ostatnia modyfikacja:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') }}</li>
           {% endif %}
-          <li><strong>Status OCR:</strong>
-            {% if doc.ocr_status == 'done' %}
-              <span class="badge bg-success">Zakończony</span>
-              {% if doc.ocr_confidence %}
-                <small class="text-muted">({{ (doc.ocr_confidence * 100) | round }}% pewności)</small>
-              {% endif %}
-            {% elif doc.ocr_status == 'running' %}
-              <span class="badge bg-primary">W trakcie</span>
-            {% elif doc.ocr_status == 'pending' %}
-              <span class="badge bg-warning">Oczekuje</span>
-            {% elif doc.ocr_status == 'fail' %}
-              <span class="badge bg-danger">Błąd</span>
-            {% else %}
-              <span class="badge bg-secondary">Niewykonany</span>
-            {% endif %}
+          <li><strong>Status:</strong>
+            <span class="badge bg-{% if doc.step == 'k1' %}danger{% elif doc.step == 'k2' %}warning{% elif doc.step == 'k3' %}success{% else %}secondary{% endif %}">
+              {{ doc.step }}
+            </span>
           </li>
         </ul>
       </div>
@@ -167,7 +137,7 @@
           <li><strong>Zoom:</strong> Ctrl + scroll lub przyciski +/- w przeglądarce</li>
           <li><strong>Nawigacja:</strong> Strzałki, Page Up/Down</li>
           <li><strong>Wyszukiwanie:</strong> Ctrl+F</li>
-          <li><strong>Pełny ekran:</strong> Przycisk "Pełny ekran" lub F11</li>
+          <li><strong>Pełny ekran:</strong> Przycisk "Pełny ekran" lub <kbd>F11</kbd></li>
         </ul>
       </div>
       <div class="col-md-6">
@@ -175,51 +145,56 @@
         <ul class="small">
           <li><strong>OCR fragmentów:</strong> Użyj zaawansowanego podglądu</li>
           <li><strong>Kopiowanie tekstu:</strong> Zaznacz tekst i kopiuj</li>
-          <li><strong>Drukowanie:</strong> Przycisk "Drukuj" lub Ctrl+P</li>
-          <li><strong>Pobieranie:</strong> Przycisk "Pobierz"</li>
+          <li><strong>Drukowanie:</strong> Przycisk "Drukuj" lub <kbd>Ctrl+P</kbd></li>
+          <li><strong>Pobieranie:</strong> Przycisk "Pobierz" w nagłówku</li>
         </ul>
       </div>
     </div>
   </div>
 </div>
 
-{% endblock %}
-
-{% block scripts %}
 <script>
-// Aktualizuj status ładowania PDF
-function updatePdfStatus(status) {
+document.addEventListener('DOMContentLoaded', function() {
+  const pdfFrame = document.getElementById('pdfFrame');
+  const pdfContainer = document.getElementById('pdfContainer');
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
+  const printBtn = document.getElementById('printBtn');
   const statusElement = document.getElementById('pdfStatus');
-  if (statusElement) {
-    statusElement.textContent = status;
 
-    if (status === 'Gotowe') {
-      statusElement.className = 'badge bg-success me-2';
-    } else if (status.includes('Błąd')) {
-      statusElement.className = 'badge bg-danger me-2';
+  // Aktualizuj status ładowania PDF
+  function updatePdfStatus(status) {
+    if (statusElement) {
+      statusElement.textContent = status;
+
+      if (status === 'Gotowe') {
+        statusElement.className = 'badge bg-success ms-2';
+      } else if (status.includes('Błąd')) {
+        statusElement.className = 'badge bg-danger ms-2';
+      }
     }
   }
 
-  // Spróbuj pobrać informacje o pliku
-  if (status === 'Gotowe') {
-    estimateFileSize();
-  }
-}
+  // Event listenery dla iframe
+  pdfFrame.addEventListener('load', function() {
+    updatePdfStatus('Gotowe');
+    loadFileSize();
+  });
 
-// Przybliżone oszacowanie rozmiaru pliku
-function estimateFileSize() {
-  // W rzeczywistej aplikacji można by pobrać rzeczywisty rozmiar pliku
-  // Na razie używamy placeholder
-  setTimeout(() => {
-    document.getElementById('fileSize').textContent = 'Informacje niedostępne';
-  }, 1000);
-}
+  pdfFrame.addEventListener('error', function() {
+    updatePdfStatus('Błąd ładowania');
+    window.alertManager.error('Nie udało się załadować podglądu PDF');
+  });
 
-// Pełny ekran
-function toggleFullscreen() {
-  const pdfContainer = document.querySelector('.pdf-container');
+  // Pełny ekran
+  fullscreenBtn.addEventListener('click', function() {
+    if (!document.fullscreenElement) {
+      enterFullscreen();
+    } else {
+      exitFullscreen();
+    }
+  });
 
-  if (!document.fullscreenElement) {
+  function enterFullscreen() {
     if (pdfContainer.requestFullscreen) {
       pdfContainer.requestFullscreen();
     } else if (pdfContainer.mozRequestFullScreen) {
@@ -229,7 +204,9 @@ function toggleFullscreen() {
     } else if (pdfContainer.msRequestFullscreen) {
       pdfContainer.msRequestFullscreen();
     }
-  } else {
+  }
+
+  function exitFullscreen() {
     if (document.exitFullscreen) {
       document.exitFullscreen();
     } else if (document.mozCancelFullScreen) {
@@ -240,113 +217,165 @@ function toggleFullscreen() {
       document.msExitFullscreen();
     }
   }
-}
 
-// Drukowanie PDF
-function printPdf() {
-  const pdfFrame = document.getElementById('pdfFrame');
+  // Drukowanie PDF
+  printBtn.addEventListener('click', function() {
+    try {
+      // Spróbuj wydrukować zawartość iframe
+      if (pdfFrame.contentWindow) {
+        pdfFrame.contentWindow.print();
+      } else {
+        throw new Error('Cannot access iframe content');
+      }
+    } catch (e) {
+      // Jeśli nie można wydrukować iframe, otwórz PDF w nowym oknie
+      window.open('{{ url_for("document_preview", doc_id=doc.id) }}', '_blank');
+      window.alertManager.info('PDF został otwarty w nowym oknie do drukowania');
+    }
+  });
 
-  try {
-    // Spróbuj wydrukować zawartość iframe
-    pdfFrame.contentWindow.print();
-  } catch (e) {
-    // Jeśli nie można wydrukować iframe, otwórz PDF w nowym oknie
-    window.open('{{ url_for("document_preview", doc_id=doc.id) }}', '_blank');
-  }
-}
+  // Obsługa zmian pełnego ekranu
+  document.addEventListener('fullscreenchange', function() {
+    const icon = fullscreenBtn.querySelector('i');
 
-// Obsługa klawiszy
-document.addEventListener('keydown', function(e) {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (document.fullscreenElement) {
+      icon.className = 'bi bi-fullscreen-exit';
+      fullscreenBtn.innerHTML = '<i class="bi bi-fullscreen-exit"></i> Wyjdź z pełnego ekranu';
+    } else {
+      icon.className = 'bi bi-arrows-fullscreen';
+      fullscreenBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i> Pełny ekran';
+    }
+  });
 
-  switch(e.key) {
-    case 'F11':
-      e.preventDefault();
-      toggleFullscreen();
-      break;
-    case 'p':
-    case 'P':
-      if (e.ctrlKey) {
+  // Obsługa klawiszy
+  document.addEventListener('keydown', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    switch(e.key) {
+      case 'F11':
         e.preventDefault();
-        printPdf();
-      }
-      break;
-  }
-});
-
-// Obsługa zmian pełnego ekranu
-document.addEventListener('fullscreenchange', function() {
-  const button = document.querySelector('button[onclick="toggleFullscreen()"]');
-  const icon = button.querySelector('i');
-
-  if (document.fullscreenElement) {
-    icon.className = 'bi bi-fullscreen-exit';
-    button.innerHTML = '<i class="bi bi-fullscreen-exit"></i> Wyjdź z pełnego ekranu';
-  } else {
-    icon.className = 'bi bi-arrows-fullscreen';
-    button.innerHTML = '<i class="bi bi-arrows-fullscreen"></i> Pełny ekran';
-  }
-});
-
-// Sprawdź rozmiar pliku przy załadowaniu
-document.addEventListener('DOMContentLoaded', function() {
-  // Spróbuj pobrać rozmiar pliku przez fetch HEAD request
-  fetch('{{ url_for("document_preview", doc_id=doc.id) }}', { method: 'HEAD' })
-    .then(response => {
-      const contentLength = response.headers.get('Content-Length');
-      if (contentLength) {
-        const sizeKB = Math.round(parseInt(contentLength) / 1024);
-        const sizeMB = (sizeKB / 1024).toFixed(1);
-
-        if (sizeKB > 1024) {
-          document.getElementById('fileSize').textContent = sizeMB + ' MB';
-        } else {
-          document.getElementById('fileSize').textContent = sizeKB + ' KB';
+        fullscreenBtn.click();
+        break;
+      case 'p':
+      case 'P':
+        if (e.ctrlKey) {
+          e.preventDefault();
+          printBtn.click();
         }
-      }
-    })
-    .catch(() => {
-      document.getElementById('fileSize').textContent = 'Nieznany';
-    });
+        break;
+      case 'Escape':
+        if (document.fullscreenElement) {
+          exitFullscreen();
+        }
+        break;
+    }
+  });
+
+  // Sprawdź rozmiar pliku
+  function loadFileSize() {
+    fetch('{{ url_for("document_preview", doc_id=doc.id) }}', { method: 'HEAD' })
+      .then(response => {
+        const contentLength = response.headers.get('Content-Length');
+        if (contentLength) {
+          const sizeKB = Math.round(parseInt(contentLength) / 1024);
+          const sizeMB = (sizeKB / 1024).toFixed(1);
+
+          if (sizeKB > 1024) {
+            document.getElementById('fileSize').textContent = sizeMB + ' MB';
+          } else {
+            document.getElementById('fileSize').textContent = sizeKB + ' KB';
+          }
+        } else {
+          document.getElementById('fileSize').textContent = 'Nieznany';
+        }
+      })
+      .catch(() => {
+        document.getElementById('fileSize').textContent = 'Nieznany';
+      });
+  }
+
+  // Auto-retry mechanizm dla PDF
+  let retryCount = 0;
+  const maxRetries = 3;
+
+  function retryLoadPdf() {
+    if (retryCount < maxRetries) {
+      retryCount++;
+      updatePdfStatus(`Ponowna próba (${retryCount}/${maxRetries})...`);
+
+      setTimeout(() => {
+        pdfFrame.src = pdfFrame.src + '?retry=' + retryCount;
+      }, 1000 * retryCount);
+    } else {
+      updatePdfStatus('Błąd ładowania - maksymalna liczba prób przekroczona');
+      window.alertManager.error('Nie udało się załadować PDF po kilku próbach. Spróbuj pobrać plik bezpośrednio.');
+    }
+  }
+
+  // Sprawdź czy iframe załadował się poprawnie po 10 sekundach
+  setTimeout(() => {
+    if (statusElement.textContent === 'Ładowanie PDF...') {
+      retryLoadPdf();
+    }
+  }, 10000);
 });
 </script>
 
 <style>
-.pdf-container {
-  background-color: #f8f9fa;
-}
-
-.pdf-container iframe {
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-}
-
-/* Styl dla pełnego ekranu */
+/* Style pełnego ekranu */
 .pdf-container:fullscreen {
   background-color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .pdf-container:fullscreen iframe {
   width: 100% !important;
   height: 100% !important;
+  box-shadow: none;
 }
 
 /* Responsywność */
 @media (max-width: 768px) {
   .pdf-container {
-    height: 60vh;
+    height: 60vh !important;
   }
 
-  .pdf-toolbar {
+  .btn-group-sm {
     flex-direction: column;
-    gap: 10px;
-  }
-
-  .pdf-toolbar .btn-group {
     width: 100%;
   }
 
-  .pdf-toolbar .btn-group .btn {
-    flex: 1;
+  .btn-group-sm .btn {
+    border-radius: 0.375rem !important;
+    margin-bottom: 0.25rem;
+  }
+
+  .card-header .d-flex {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
+
+/* Loading animation */
+#pdfStatus {
+  transition: all 0.3s ease;
+}
+
+/* Better iframe styling */
+#pdfFrame {
+  transition: opacity 0.3s ease;
+}
+
+#pdfFrame:not([src]) {
+  opacity: 0.5;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .pdf-container {
+    background-color: #2d3748 !important;
   }
 }
 </style>

@@ -1,15 +1,24 @@
 {% extends 'base.html' %}
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h2>Dodaj dokumenty do opinii</h2>
-  <div>
-    <a href="{{ url_for('opinion_detail', doc_id=opinion.id) }}" class="btn btn-outline-secondary">
-      <i class="bi bi-arrow-left"></i> Powrót do opinii
-    </a>
-  </div>
-</div>
 
-<div class="card mb-4">
+{# Ustawienia dla base.html #}
+{% set page_type = 'upload_form' %}
+{% set page_title = 'Dodaj dokumenty do opinii' %}
+{% set breadcrumbs = [
+  {'name': 'Lista opinii', 'url': url_for('list_opinions'), 'icon': 'list'},
+  {'name': opinion.sygnatura or opinion.original_filename, 'url': url_for('opinion_detail', doc_id=opinion.id), 'icon': 'folder'},
+  {'name': 'Dodaj dokumenty', 'url': '#', 'icon': 'plus-circle'}
+] %}
+{% set page_actions = [
+  {
+    'name': 'Powrót do opinii',
+    'url': url_for('opinion_detail', doc_id=opinion.id),
+    'icon': 'arrow-left',
+    'class': 'btn-outline-secondary'
+  }
+] %}
+
+{% block content %}
+<div class="card">
   <div class="card-header bg-light">
     <h5 class="mb-0">
       <i class="bi bi-paperclip me-2"></i>Opinia: {{ opinion.sygnatura or opinion.original_filename }}
@@ -29,7 +38,7 @@
           <option value="Inne">Inne</option>
         </select>
       </div>
-      
+
       <div class="mb-3">
         <label for="files" class="form-label">Wybierz pliki</label>
         <input type="file" name="files" id="files" class="form-control" multiple required accept="{{ allowed_types }}">
@@ -37,19 +46,19 @@
           Dozwolone typy plików: {{ allowed_types }}
         </div>
       </div>
-      
+
       <div class="mb-3 form-check">
         <!-- Zapewniamy że wartość run_ocr zawsze będzie przesyłana (true lub false) -->
         <input type="checkbox" name="run_ocr" id="run_ocr" class="form-check-input" checked>
         <label for="run_ocr" class="form-check-label">Uruchom OCR automatycznie po wgraniu</label>
       </div>
-      
+
       <div class="alert alert-info mt-4">
         <i class="bi bi-info-circle-fill me-2"></i>
         <strong>Informacja:</strong> Jeśli OCR jest włączony, po wgraniu dokumenty będą automatycznie przetwarzane w tle.
         Możesz kontynuować korzystanie z aplikacji podczas gdy OCR będzie wykonywany.
       </div>
-      
+
       <div class="d-flex justify-content-end mt-4">
         <a href="{{ url_for('opinion_detail', doc_id=opinion.id) }}" class="btn btn-outline-secondary me-2">Anuluj</a>
         <button type="submit" class="btn btn-primary" id="submitButton">
@@ -57,7 +66,7 @@
         </button>
       </div>
     </form>
-    
+
     <!-- Element dla wskaźnika ładowania - domyślnie ukryty -->
     <div id="processingIndicator" style="display: none;" class="mt-4">
       <div class="card bg-light">
@@ -79,21 +88,105 @@
     </div>
   </div>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-  const form = document.getElementById('uploadForm');
-  const submitButton = document.getElementById('submitButton');
-  const processingIndicator = document.getElementById('processingIndicator');
-  const processingMessage = document.getElementById('processingMessage');
-  const runOcrCheckbox = document.getElementById('run_ocr');
-  const filesInput = document.getElementById('files');
-  
-  form.addEventListener('submit', function() {
-    // Sprawdź czy OCR jest włączony i czy wybrano pliki
-    const ocrEnabled = runOcrCheckbox.checked;
-    const files = filesInput.files;
-    
+// Upload Form Manager
+class UploadFormManager {
+  constructor() {
+    this.form = document.getElementById('uploadForm');
+    this.submitButton = document.getElementById('submitButton');
+    this.processingIndicator = document.getElementById('processingIndicator');
+    this.processingMessage = document.getElementById('processingMessage');
+    this.runOcrCheckbox = document.getElementById('run_ocr');
+    this.filesInput = document.getElementById('files');
+
+    this.init();
+  }
+
+  init() {
+    this.setupEventListeners();
+    this.setupValidation();
+  }
+
+  setupEventListeners() {
+    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+    this.filesInput.addEventListener('change', () => this.validateFiles());
+  }
+
+  setupValidation() {
+    // Walidacja typów plików
+    this.filesInput.addEventListener('change', (e) => {
+      const files = e.target.files;
+      const allowedTypes = '{{ allowed_types }}'.split(',').map(t => t.trim());
+
+      for (let file of files) {
+        const extension = '.' + file.name.split('.').pop().toLowerCase();
+
+        if (!allowedTypes.includes(extension)) {
+          window.alertManager.error(`Nieobsługiwany typ pliku: ${file.name}`);
+          e.target.value = '';
+          return;
+        }
+      }
+
+      this.updateSubmitButton();
+    });
+  }
+
+  validateFiles() {
+    const files = this.filesInput.files;
+
+    if (files.length === 0) {
+      return false;
+    }
+
+    // Sprawdź rozmiar plików
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    let totalSize = 0;
+
+    for (let file of files) {
+      totalSize += file.size;
+
+      if (file.size > maxSize) {
+        window.alertManager.error(`Plik ${file.name} jest za duży (max 50MB)`);
+        return false;
+      }
+    }
+
+    if (totalSize > 200 * 1024 * 1024) { // 200MB total
+      window.alertManager.error('Łączny rozmiar plików przekracza 200MB');
+      return false;
+    }
+
+    return true;
+  }
+
+  updateSubmitButton() {
+    const files = this.filesInput.files;
+    const docType = document.getElementById('doc_type').value;
+
+    const isValid = files.length > 0 && docType && this.validateFiles();
+    this.submitButton.disabled = !isValid;
+
+    if (files.length > 0) {
+      const fileText = files.length === 1 ? 'plik' : files.length <= 4 ? 'pliki' : 'plików';
+      this.submitButton.innerHTML = `<i class="bi bi-upload me-1"></i> Wyślij ${files.length} ${fileText}`;
+    } else {
+      this.submitButton.innerHTML = '<i class="bi bi-upload me-1"></i> Wyślij pliki';
+    }
+  }
+
+  handleSubmit(e) {
+    if (!this.validateFiles()) {
+      e.preventDefault();
+      return;
+    }
+
+    const ocrEnabled = this.runOcrCheckbox.checked;
+    const files = this.filesInput.files;
+
     if (ocrEnabled && files.length > 0) {
       // Dostosuj komunikat w zależności od liczby plików
       let message;
@@ -106,22 +199,34 @@ document.addEventListener('DOMContentLoaded', function() {
                   Przetwarzanie może potrwać od kilkunastu sekund do kilku minut,
                   w zależności od rozmiaru i złożoności.`;
       }
-      
+
       // Aktualizuj komunikat
-      processingMessage.textContent = message;
-      
+      this.processingMessage.textContent = message;
+
       // Ukryj przycisk i pokaż wskaźnik przetwarzania
-      submitButton.disabled = true;
-      processingIndicator.style.display = 'block';
-      
+      this.submitButton.disabled = true;
+      this.processingIndicator.style.display = 'block';
+
       // Przewiń do wskaźnika przetwarzania
-      processingIndicator.scrollIntoView({ behavior: 'smooth' });
+      this.processingIndicator.scrollIntoView({ behavior: 'smooth' });
     } else if (!ocrEnabled) {
       // Jeśli OCR jest wyłączony, tylko wyłącz przycisk na chwilę
-      submitButton.disabled = true;
-      submitButton.innerHTML = '<i class="bi bi-upload me-1"></i> Wysyłanie...';
+      this.submitButton.disabled = true;
+      this.submitButton.innerHTML = '<i class="bi bi-upload me-1"></i> Wysyłanie...';
     }
+  }
+}
+
+// Inicjalizacja po załadowaniu DOM
+document.addEventListener('DOMContentLoaded', function() {
+  const uploadFormManager = new UploadFormManager();
+
+  // Aktualizuj przycisk przy zmianie typu dokumentu
+  document.getElementById('doc_type').addEventListener('change', () => {
+    uploadFormManager.updateSubmitButton();
   });
+
+  console.log('Upload Form Manager zainicjalizowany');
 });
 </script>
 {% endblock %}

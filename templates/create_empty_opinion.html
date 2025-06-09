@@ -1,7 +1,8 @@
-<!-- templates/create_empty_opinion.html - ZAKTUALIZOWANY -->
 {% extends 'base.html' %}
 
-<!-- Breadcrumbs i page_title są automatyczne z base.html -->
+{# Ustawienia dla base.html - POPRAWKA: page_actions usuwamy #}
+{% set page_type = 'create_form' %}
+{# POPRAWIONE: Usuń ręczne page_actions, będą z backendu #}
 
 {% block content %}
 <div class="card">
@@ -11,12 +12,14 @@
     </h5>
   </div>
   <div class="card-body">
-    <form method="post">
+    <form method="post" id="createOpinionForm">
+      <!-- Reszta kodu formularza bez zmian -->
       <div class="row mb-3">
         <div class="col-md-6">
           <label for="sygnatura" class="form-label">Sygnatura sprawy</label>
           <input type="text" class="form-control" id="sygnatura" name="sygnatura"
                  placeholder="Np. IV K 123/23">
+          <div class="form-text">Opcjonalne - możesz dodać później</div>
         </div>
         <div class="col-md-6">
           <label for="step" class="form-label">Status początkowy</label>
@@ -40,24 +43,120 @@
         </select>
       </div>
 
+      <div class="mb-3">
+        <label for="note" class="form-label">Notatka początkowa <small class="text-muted">(opcjonalna)</small></label>
+        <textarea class="form-control" id="note" name="note" rows="3"
+                  placeholder="Wprowadź początkową notatkę do opinii..."></textarea>
+      </div>
+
       <div class="alert alert-info">
         <i class="bi bi-info-circle-fill me-2"></i>
         <strong>Informacja:</strong> Tworzysz pustą opinię. Dokumenty Word i pliki PDF możesz dodać później
         z poziomu widoku szczegółów opinii.
       </div>
 
+      <!-- POPRAWKA: Usuń ręczne przyciski, użyj page_actions z base.html -->
       <div class="d-flex justify-content-end gap-2">
-        <!-- Automatyczny przycisk anuluj -->
-        {% if breadcrumbs and breadcrumbs|length > 1 %}
-          <a href="{{ breadcrumbs[-2].url }}" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left me-1"></i>Anuluj
-          </a>
-        {% endif %}
-        <button type="submit" class="btn btn-primary">
+        <button type="submit" class="btn btn-primary" id="submitBtn">
           <i class="bi bi-plus-circle me-1"></i> Utwórz opinię
         </button>
       </div>
     </form>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Create Opinion Form Manager
+class CreateOpinionFormManager {
+  constructor() {
+    this.form = document.getElementById('createOpinionForm');
+    this.submitBtn = document.getElementById('submitBtn');
+    this.docTypeSelect = document.getElementById('doc_type');
+    
+    this.init();
+  }
+
+  init() {
+    this.setupEventListeners();
+    this.setupValidation();
+  }
+
+  setupEventListeners() {
+    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+    this.docTypeSelect.addEventListener('change', () => this.updateSubmitButton());
+  }
+
+  setupValidation() {
+    // Walidacja w czasie rzeczywistym
+    const requiredFields = this.form.querySelectorAll('[required]');
+    
+    requiredFields.forEach(field => {
+      field.addEventListener('input', () => this.validateForm());
+      field.addEventListener('change', () => this.validateForm());
+    });
+
+    // Początkowa walidacja
+    this.validateForm();
+  }
+
+  validateForm() {
+    const docType = this.docTypeSelect.value;
+    const isValid = docType.trim() !== '';
+    
+    this.submitBtn.disabled = !isValid;
+    
+    if (isValid) {
+      this.submitBtn.classList.remove('btn-secondary');
+      this.submitBtn.classList.add('btn-primary');
+    } else {
+      this.submitBtn.classList.remove('btn-primary');
+      this.submitBtn.classList.add('btn-secondary');
+    }
+  }
+
+  updateSubmitButton() {
+    const docType = this.docTypeSelect.value;
+    
+    if (docType) {
+      this.submitBtn.innerHTML = `<i class="bi bi-plus-circle me-1"></i> Utwórz ${docType.toLowerCase()}`;
+    } else {
+      this.submitBtn.innerHTML = '<i class="bi bi-plus-circle me-1"></i> Utwórz opinię';
+    }
+  }
+
+  handleSubmit(e) {
+    if (!this.validateSubmission()) {
+      e.preventDefault();
+      return;
+    }
+
+    // Pokaż loading
+    this.submitBtn.disabled = true;
+    this.submitBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i> Tworzenie...';
+
+    // Pozwól na normalne działanie formularza
+  }
+
+  validateSubmission() {
+    const docType = this.docTypeSelect.value;
+    
+    if (!docType) {
+      window.alertManager.error('Wybierz rodzaj dokumentu');
+      this.docTypeSelect.focus();
+      return false;
+    }
+
+    return true;
+  }
+}
+
+// Inicjalizacja po załadowaniu DOM
+document.addEventListener('DOMContentLoaded', function() {
+  const createOpinionFormManager = new CreateOpinionFormManager();
+  
+  console.log('Create Opinion Form Manager zainicjalizowany');
+});
+</script>
 {% endblock %}
