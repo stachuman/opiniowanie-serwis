@@ -282,7 +282,7 @@
   </div>
 </div>
 
-<!-- Modal potwierdzenia usunięcia -->
+<!-- Modal potwierdzenia usunięcia - POPRAWIONA WERSJA -->
 <div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -301,9 +301,12 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
-        <a href="{{ url_for('document_delete', doc_id=doc.id) }}" class="btn btn-danger">
-          <i class="bi bi-trash"></i> Usuń
-        </a>
+        <!-- POPRAWKA: Zmieniono link na formularz POST -->
+        <form method="post" action="{{ url_for('document_delete', doc_id=doc.id) }}" style="display: inline;">
+          <button type="submit" class="btn btn-danger">
+            <i class="bi bi-trash"></i> Usuń
+          </button>
+        </form>
       </div>
     </div>
   </div>

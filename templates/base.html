@@ -393,6 +393,8 @@
   <script src="{{ url_for('static', path='js/pages/pdf-viewer.js') }}"></script>
   {% elif page_type == 'image_viewer' %}
   <script src="{{ url_for('static', path='js/pages/image-viewer.js') }}"></script>
+  {% elif page_type == 'upload_form' %}
+  <script src="{{ url_for('static', path='js/pages/upload-detail.js') }}"></script>
   {% endif %}
 
   <!-- Klikalny wiersz tabeli - legacy support -->

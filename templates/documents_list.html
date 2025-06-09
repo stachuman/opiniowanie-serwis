@@ -1,0 +1,634 @@
+{% extends 'base.html' %}
+
+{# Ustawienia dla base.html #}
+{% set page_type = 'documents_list' %}
+
+{% block content %}
+<!-- Alerty -->
+{% if request.query_params.get('ocr_started') %}
+<div class="alert alert-success alert-dismissible fade show mb-4">
+  <i class="bi bi-lightning-fill me-2"></i>
+  Rozpoczęto przetwarzanie OCR dla {{ request.query_params.get('count', '1') }}
+  {{ 'pliku' if request.query_params.get('count') == '1' else 'plików' }}.
+  Status można śledzić w tabeli poniżej.
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<!-- Filtry i wyszukiwanie -->
+<div class="card mb-4">
+  <div class="card-header bg-light">
+    <h5 class="card-title mb-0">
+      <i class="bi bi-funnel me-2"></i>Filtrowanie dokumentów
+    </h5>
+  </div>
+  <div class="card-body">
+    <form method="get" class="row g-3" id="documentsFilterForm">
+      <!-- Filtry statusów -->
+      <div class="col-md-6">
+        <label class="form-label">Status dokumentów</label>
+        <div class="d-flex flex-wrap gap-3">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="k1" id="filter_k1"
+                   {% if current_filters.k1 %}checked{% endif %}>
+            <label class="form-check-label" for="filter_k1">
+              <span class="badge bg-danger me-1">k1</span> Wywiad
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="k2" id="filter_k2"
+                   {% if current_filters.k2 %}checked{% endif %}>
+            <label class="form-check-label" for="filter_k2">
+              <span class="badge bg-warning me-1">k2</span> Wyciąg z akt
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="k3" id="filter_k3"
+                   {% if current_filters.k3 %}checked{% endif %}>
+            <label class="form-check-label" for="filter_k3">
+              <span class="badge bg-success me-1">k3</span> Opinia
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="k4" id="filter_k4"
+                   {% if current_filters.k4 %}checked{% endif %}>
+            <label class="form-check-label" for="filter_k4">
+              <span class="badge bg-secondary me-1">k4</span> Archiwum
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Wyszukiwanie -->
+      <div class="col-md-6">
+        <label class="form-label">Wyszukiwanie</label>
+        <div class="input-group">
+          <input type="text" class="form-control" name="search" id="search"
+                 placeholder="Nazwa pliku, sygnatura, notatka..."
+                 value="{{ current_filters.search }}">
+          <button class="btn btn-primary" type="submit">
+            <i class="bi bi-search me-1"></i>Filtruj
+          </button>
+        </div>
+
+        <!-- Opcje wyszukiwania -->
+        <div class="mt-2">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="search_content" id="search_content"
+                   {% if current_filters.search_content %}checked{% endif %}>
+            <label class="form-check-label" for="search_content">
+              <i class="bi bi-file-text me-1"></i> Wyszukaj również w treści dokumentów
+              <small class="text-muted">(PDF, Word, OCR)</small>
+            </label>
+          </div>
+          <div class="form-check mt-1">
+            <input class="form-check-input" type="checkbox" name="fuzzy_search" id="fuzzy_search"
+                   {% if current_filters.fuzzy_search %}checked{% endif %}>
+            <label class="form-check-label" for="fuzzy_search">
+              <i class="bi bi-magic me-1"></i> Wyszukiwanie rozmyte
+              <small class="text-muted">(ignoruje błędy pisowni, znaki diakrytyczne)</small>
+            </label>
+          </div>
+        </div>
+        <div class="form-text">
+          <strong>Wyszukiwanie standardowe:</strong> nazwa pliku, sygnatura, notatka<br>
+          <strong>Wyszukiwanie w treści:</strong> zawartość PDF, Word, wyników OCR<br>
+          <strong>Wyszukiwanie rozmyte:</strong> znajduje podobne słowa
+          {% if not has_docx %}
+          <div class="text-warning mt-1">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            <small>Wyszukiwanie w dokumentach Word wymaga biblioteki python-docx</small>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Filtr typu dokumentu -->
+      <div class="col-md-4">
+        <label for="doc_type_filter" class="form-label">Typ dokumentu</label>
+        <select class="form-select" name="doc_type_filter" id="doc_type_filter">
+          <option value="">Wszystkie typy</option>
+          {% for doc_type in unique_doc_types %}
+          <option value="{{ doc_type }}" {% if current_filters.doc_type_filter == doc_type %}selected{% endif %}>
+            {{ doc_type }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-8">
+        <label class="form-label">&nbsp;</label>
+        <div class="d-flex gap-2">
+          <a href="{{ url_for('list_documents') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-x-circle me-1"></i> Resetuj filtry
+          </a>
+          <button type="button" class="btn btn-outline-info" id="selectAllBtn">
+            <i class="bi bi-check-all me-1"></i> Zaznacz wszystkie
+          </button>
+          <button type="button" class="btn btn-outline-warning" id="deselectAllBtn">
+            <i class="bi bi-dash-square me-1"></i> Odznacz wszystkie
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Wyniki wyszukiwania -->
+{% if current_filters.search %}
+<div class="alert alert-info mb-4">
+  <i class="bi bi-info-circle me-2"></i>
+  {% if search_matches %}
+    Znaleziono <strong>{{ search_matches }}</strong> dopasowań dla zapytania "<strong>{{ current_filters.search }}</strong>"
+  {% else %}
+    Brak wyników dla zapytania "<strong>{{ current_filters.search }}</strong>"
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Lista dokumentów -->
+<div class="card">
+  <div class="card-header bg-light">
+    <div class="d-flex justify-content-between align-items-center">
+      <h5 class="card-title mb-0">
+        <i class="bi bi-files me-2"></i>Wykaz dokumentów
+      </h5>
+      <div class="d-flex gap-2 align-items-center">
+        <span class="badge bg-primary">
+          {% if total_count %}
+            Wyświetlane: {{ total_count }}
+            {% if current_filters.search or current_filters.doc_type_filter or not (current_filters.k1 and current_filters.k2 and current_filters.k3 and current_filters.k4) %}
+              (po filtrowaniu)
+            {% endif %}
+          {% else %}
+            Łącznie: {{ docs|length }}
+          {% endif %}
+        </span>
+        <a href="{{ url_for('documents_export_csv') }}{% if current_filters %}?{{ request.query_params }}{% endif %}"
+           class="btn btn-sm btn-outline-success">
+          <i class="bi bi-file-earmark-spreadsheet me-1"></i>Eksportuj CSV
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="card-body p-0">
+    {% if docs|length == 0 %}
+      <div class="text-center py-5">
+        <i class="bi bi-files" style="font-size: 3rem; color: #6c757d;"></i>
+        {% if current_filters.search or current_filters.doc_type_filter or not (current_filters.k1 and current_filters.k2 and current_filters.k3 and current_filters.k4) %}
+          <p class="mt-3 text-muted">Nie znaleziono dokumentów spełniających kryteria filtrowania.</p>
+          <p>Spróbuj zmienić filtry lub zresetować wyszukiwanie.</p>
+          <a href="{{ url_for('list_documents') }}" class="btn btn-outline-primary mt-2">
+            <i class="bi bi-x-circle me-1"></i>Wyczyść filtry
+          </a>
+        {% else %}
+          <p class="mt-3 text-muted">Brak dokumentów w bazie danych.</p>
+          <p>Dodaj pierwszy dokument, aby rozpocząć.</p>
+          <a href="{{ url_for('quick_ocr_form') }}" class="btn btn-primary mt-2">
+            <i class="bi bi-lightning me-1"></i>Szybki OCR
+          </a>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col" width="50">Typ</th>
+              <th scope="col" width="120">Sygnatura</th>
+              <th scope="col" width="150">Typ dok.</th>
+              <th scope="col">Nazwa pliku</th>
+              <th scope="col" width="200">Notatka</th>
+              <th scope="col" width="80" class="text-center">Status</th>
+              <th scope="col" width="80" class="text-center">OCR</th>
+              <th scope="col" width="110">Data</th>
+              <th scope="col" width="220" class="text-center">Akcje</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for doc in docs %}
+            <tr data-href="{{ url_for('document_detail', doc_id=doc.id) if not doc.is_main else url_for('opinion_detail', doc_id=doc.id) }}">
+              <!-- Ikona typu dokumentu -->
+              <td>
+                {% if doc.is_main %}
+                  <i class="bi bi-star-fill text-warning" title="Opinia główna"></i>
+                {% elif doc.mime_type and doc.mime_type.startswith('image/') %}
+                  <i class="bi bi-file-earmark-image text-info" title="Obraz"></i>
+                {% elif doc.mime_type == 'application/pdf' %}
+                  <i class="bi bi-file-earmark-pdf text-danger" title="PDF"></i>
+                {% elif doc.mime_type and 'word' in doc.mime_type %}
+                  <i class="bi bi-file-earmark-word text-primary" title="Word"></i>
+                {% elif doc.doc_type == 'OCR TXT' %}
+                  <i class="bi bi-file-earmark-text text-success" title="Wynik OCR"></i>
+                {% else %}
+                  <i class="bi bi-file-earmark text-secondary" title="Dokument"></i>
+                {% endif %}
+              </td>
+
+              <!-- Sygnatura -->
+              <td>
+                {% if doc.sygnatura %}
+                  <strong>{{ doc.sygnatura }}</strong>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+
+              <!-- Typ dokumentu -->
+              <td>
+                <span class="badge bg-light text-dark">{{ doc.doc_type or "Nieznany" }}</span>
+              </td>
+
+              <!-- Nazwa pliku -->
+              <td>
+                <div class="text-truncate" style="max-width: 300px;" title="{{ doc.original_filename }}">
+                  <strong>{{ doc.original_filename }}</strong>
+                </div>
+              </td>
+
+              <!-- Notatka -->
+              <td>
+                {% if doc.note %}
+                  <span class="text-muted">{{ doc.note }}</span>
+                {% else %}
+                  <span class="text-muted small"><em>Brak notatki</em></span>
+                {% endif %}
+                <button type="button" class="btn btn-sm btn-outline-secondary ms-2 py-0 px-1 edit-note-btn"
+                        data-doc-id="{{ doc.id }}"
+                        data-current-note="{{ doc.note|default('', true) }}"
+                        onclick="event.stopPropagation()"
+                        title="{{ 'Edytuj' if doc.note else 'Dodaj' }} notatkę">
+                  <i class="bi bi-pencil-square"></i>
+                </button>
+              </td>
+
+              <!-- Status -->
+              <td class="text-center">
+                {% if doc.step == 'k1' %}
+                  <span class="badge bg-danger p-2">
+                    <i class="bi bi-pencil-fill me-1"></i>{{ doc.step }}
+                  </span>
+                {% elif doc.step == 'k2' %}
+                  <span class="badge bg-warning p-2">
+                    <i class="bi bi-journals me-1"></i>{{ doc.step }}
+                  </span>
+                {% elif doc.step == 'k3' %}
+                  <span class="badge bg-success p-2">
+                    <i class="bi bi-check-circle-fill me-1"></i>{{ doc.step }}
+                  </span>
+                {% else %}
+                  <span class="badge bg-secondary p-2">
+                    <i class="bi bi-archive-fill me-1"></i>{{ doc.step }}
+                  </span>
+                {% endif %}
+              </td>
+
+              <!-- Status OCR -->
+              <td class="text-center">
+                {% if doc.ocr_status == 'done' %}
+                  <span class="badge bg-success p-2" title="OCR zakończony">
+                    <i class="bi bi-check-circle-fill"></i>
+                  </span>
+                {% elif doc.ocr_status == 'running' %}
+                  <span class="badge bg-primary p-2" title="OCR w trakcie">
+                    <i class="bi bi-arrow-repeat"></i>
+                    <span class="spinner-border spinner-border-sm ms-1" role="status"></span>
+                  </span>
+                {% elif doc.ocr_status == 'fail' %}
+                  <span class="badge bg-danger p-2" title="OCR zakończony błędem">
+                    <i class="bi bi-x-circle-fill"></i>
+                  </span>
+                {% elif doc.ocr_status == 'pending' %}
+                  <span class="badge bg-warning p-2" title="OCR oczekuje">
+                    <i class="bi bi-hourglass-split"></i>
+                  </span>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+
+              <!-- Data -->
+              <td>
+                <small>{{ doc.upload_time.strftime('%Y-%m-%d %H:%M') if doc.upload_time else 'Brak' }}</small>
+              </td>
+
+              <!-- Akcje -->
+              <td class="text-center" onclick="event.stopPropagation();">
+                <div class="btn-group">
+                  <!-- Główny przycisk podglądu -->
+                  {% if doc.is_main %}
+                    <a href="{{ url_for('opinion_detail', doc_id=doc.id) }}"
+                       class="btn btn-sm btn-primary" title="Szczegóły opinii">
+                      <i class="bi bi-eye"></i>
+                    </a>
+                  {% elif doc.mime_type == 'application/pdf' %}
+                    <a href="{{ url_for('document_pdf_viewer', doc_id=doc.id) }}"
+                       class="btn btn-sm btn-primary" title="Podgląd PDF z OCR">
+                      <i class="bi bi-search"></i>
+                    </a>
+                  {% elif doc.mime_type and doc.mime_type.startswith('image/') %}
+                    <a href="{{ url_for('document_image_viewer', doc_id=doc.id) }}"
+                       class="btn btn-sm btn-primary" title="Podgląd obrazu z OCR">
+                      <i class="bi bi-search"></i>
+                    </a>
+                  {% else %}
+                    <a href="{{ url_for('document_detail', doc_id=doc.id) }}"
+                       class="btn btn-sm btn-primary" title="Szczegóły dokumentu">
+                      <i class="bi bi-eye"></i>
+                    </a>
+                  {% endif %}
+
+                  <!-- Dropdown z dodatkowymi akcjami -->
+                  <button class="btn btn-sm btn-primary dropdown-toggle dropdown-toggle-split"
+                          data-bs-toggle="dropdown" aria-expanded="false">
+                    <span class="visually-hidden">Więcej akcji</span>
+                  </button>
+                  <ul class="dropdown-menu">
+                    <!-- AI Summary dla dokumentów z OCR -->
+                    {% if doc.ocr_status == 'done' and not doc.is_main %}
+                      <li>
+                        <button class="dropdown-item quick-summary-btn"
+                                data-doc-id="{{ doc.id }}" data-doc-name="{{ doc.original_filename }}">
+                          <i class="bi bi-robot me-2"></i>Podsumowanie AI
+                        </button>
+                      </li>
+                      <li><hr class="dropdown-divider"></li>
+                    {% endif %}
+
+                    <!-- Szczegóły (dla PDF/obrazów które mają zaawansowany viewer) -->
+                    {% if doc.mime_type == 'application/pdf' or (doc.mime_type and doc.mime_type.startswith('image/')) %}
+                      <li>
+                        <a class="dropdown-item" href="{{ url_for('document_detail', doc_id=doc.id) }}">
+                          <i class="bi bi-info-circle me-2"></i>Szczegóły
+                        </a>
+                      </li>
+                    {% endif %}
+
+                    <!-- Pobierz -->
+                    <li>
+                      <a class="dropdown-item" href="{{ url_for('document_download', doc_id=doc.id) }}">
+                        <i class="bi bi-download me-2"></i>Pobierz
+                      </a>
+                    </li>
+
+                    <!-- OCR (jeśli nie wykonany) -->
+                    {% if doc.ocr_status == 'none' and not doc.doc_type == 'OCR TXT' %}
+                      <li><hr class="dropdown-divider"></li>
+                      <li>
+                        <a class="dropdown-item" href="{{ url_for('document_run_ocr', doc_id=doc.id) }}">
+                          <i class="bi bi-play me-2"></i>Uruchom OCR
+                        </a>
+                      </li>
+                    {% endif %}
+                  </ul>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Statystyki na dole -->
+  {% if docs|length > 0 %}
+  <div class="card-footer bg-light">
+    <div class="row text-center">
+      <div class="col-md-3">
+        <small><strong>{{ docs|selectattr("is_main", "equalto", true)|list|length }}</strong> opinii głównych</small>
+      </div>
+      <div class="col-md-3">
+        <small><strong>{{ docs|selectattr("ocr_status", "equalto", "done")|list|length }}</strong> z ukończonym OCR</small>
+      </div>
+      <div class="col-md-3">
+        <small><strong>{{ docs|selectattr("mime_type", "equalto", "application/pdf")|list|length }}</strong> plików PDF</small>
+      </div>
+      <div class="col-md-3">
+        <small><strong>{{ docs|selectattr("mime_type", "equalto", "image/")|list|length }}</strong> obrazów</small>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Informacje o dodawaniu dokumentów -->
+{% if docs|length == 0 %}
+<div class="card mt-4">
+  <div class="card-header bg-light">
+    <h5 class="card-title mb-0">
+      <i class="bi bi-plus-circle me-2"></i>Dodaj dokumenty
+    </h5>
+  </div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <div class="card h-100">
+          <div class="card-body text-center">
+            <i class="bi bi-file-earmark-word text-primary" style="font-size: 2rem;"></i>
+            <h5 class="mt-3">Nowa opinia</h5>
+            <p class="text-muted">Utwórz opinię dodając dokument Word (.doc, .docx)</p>
+            <a href="{{ url_for('upload_form') }}" class="btn btn-primary mt-2">
+              <i class="bi bi-file-earmark-word me-1"></i> Dodaj opinię
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4 mb-3">
+        <div class="card h-100">
+          <div class="card-body text-center">
+            <i class="bi bi-lightning text-warning" style="font-size: 2rem;"></i>
+            <h5 class="mt-3">Szybki OCR</h5>
+            <p class="text-muted">Wgraj i przetwórz dokumenty PDF lub obrazy</p>
+            <a href="{{ url_for('quick_ocr_form') }}" class="btn btn-warning mt-2">
+              <i class="bi bi-lightning me-1"></i> Szybki OCR
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4 mb-3">
+        <div class="card h-100">
+          <div class="card-body text-center">
+            <i class="bi bi-plus-square text-success" style="font-size: 2rem;"></i>
+            <h5 class="mt-3">Pusta opinia</h5>
+            <p class="text-muted">Utwórz pustą opinię, do której później dodasz dokumenty</p>
+            <a href="{{ url_for('create_empty_opinion_form') }}" class="btn btn-success mt-2">
+              <i class="bi bi-plus-circle me-1"></i> Pusta opinia
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Automatyczne odświeżanie dla aktywnych procesów OCR
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('Documents List zainicjalizowana');
+
+  // Auto-odświeżanie jeśli są aktywne procesy OCR
+  {% if docs|selectattr("ocr_status", "equalto", "running")|list|length > 0 %}
+  const refreshInterval = setInterval(function() {
+    // Sprawdź czy użytkownik wciąż jest na stronie
+    if (document.visibilityState === 'visible') {
+      location.reload();
+    }
+  }, 10000);
+
+  // Wyczyść interval gdy użytkownik opuści stronę
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden') {
+      clearInterval(refreshInterval);
+    }
+  });
+  {% endif %}
+
+  // ========== FILTRY ==========
+
+  // Przyciski zaznacz/odznacz wszystkie
+  document.getElementById('selectAllBtn').addEventListener('click', function() {
+    const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
+    checkboxes.forEach(checkbox => checkbox.checked = true);
+  });
+
+  document.getElementById('deselectAllBtn').addEventListener('click', function() {
+    const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
+    checkboxes.forEach(checkbox => checkbox.checked = false);
+  });
+
+  // Auto-submit filtrów przy zmianie checkbox'ów
+  const form = document.getElementById('documentsFilterForm');
+  const filterCheckboxes = form.querySelectorAll('input[type="checkbox"][name^="k"]');
+  const searchContentCheckbox = form.querySelector('input[name="search_content"]');
+  const fuzzySearchCheckbox = form.querySelector('input[name="fuzzy_search"]');
+  const docTypeSelect = form.querySelector('select[name="doc_type_filter"]');
+
+  filterCheckboxes.forEach(checkbox => {
+    checkbox.addEventListener('change', function() {
+      clearTimeout(window.filterTimeout);
+      window.filterTimeout = setTimeout(() => form.submit(), 500);
+    });
+  });
+
+  // Obsługa wyszukiwania w treści
+  if (searchContentCheckbox) {
+    searchContentCheckbox.addEventListener('change', function() {
+      const searchInput = form.querySelector('input[name="search"]');
+      if (this.checked && searchInput.value.trim()) {
+        if (confirm('Wyszukiwanie w treści dokumentów może być wolne. Kontynuować?')) {
+          form.submit();
+        } else {
+          this.checked = false;
+        }
+      } else if (!this.checked) {
+        form.submit();
+      }
+    });
+  }
+
+  // Obsługa wyszukiwania rozmytego
+  if (fuzzySearchCheckbox) {
+    fuzzySearchCheckbox.addEventListener('change', function() {
+      const searchInput = form.querySelector('input[name="search"]');
+      if (searchInput.value.trim()) {
+        form.submit();
+      }
+    });
+  }
+
+  // Auto-submit dla select'a typu dokumentu
+  if (docTypeSelect) {
+    docTypeSelect.addEventListener('change', function() {
+      form.submit();
+    });
+  }
+
+  // Enter w polu wyszukiwania
+  const searchInput = form.querySelector('input[name="search"]');
+  if (searchInput) {
+    searchInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        form.submit();
+      }
+    });
+  }
+
+  // ========== AKCJE NA DOKUMENTACH ==========
+
+  // Obsługa przycisków edycji notatki
+  document.addEventListener('click', function(e) {
+    const editBtn = e.target.closest('.edit-note-btn');
+    if (!editBtn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const docId = editBtn.getAttribute('data-doc-id');
+    const currentNote = editBtn.getAttribute('data-current-note');
+
+    // Użyj modalManager (sprawdź czy jest dostępny)
+    if (window.modalManager) {
+      window.modalManager.showNoteEdit(docId, currentNote, false); // false = nie jest opinią
+    } else {
+      // Fallback - prosty prompt
+      const newNote = prompt('Wprowadź notatkę do dokumentu:', currentNote || '');
+      if (newNote !== null) {
+        // Wyślij AJAX request
+        const formData = new FormData();
+        formData.append('note', newNote);
+
+        fetch(`/document/${docId}/update-note`, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'Accept': 'application/json'
+          }
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            location.reload();
+          } else {
+            alert('Błąd podczas aktualizacji notatki');
+          }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          alert('Błąd podczas aktualizacji notatki');
+        });
+      }
+    }
+  });
+
+  // Obsługa przycisków szybkiego podsumowania AI
+  document.addEventListener('click', function(e) {
+    const summaryBtn = e.target.closest('.quick-summary-btn');
+    if (!summaryBtn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const docId = summaryBtn.getAttribute('data-doc-id');
+    const docName = summaryBtn.getAttribute('data-doc-name');
+
+    // Użyj modalManager jeśli dostępny
+    if (window.modalManager) {
+      window.modalManager.showQuickSummary(docId, docName);
+    } else {
+      // Fallback - przekieruj do strony podsumowania
+      window.location.href = `/document/${docId}/summarize`;
+    }
+  });
+
+  console.log('Documents List - wszystkie event listenery zostały zarejestrowane');
+});
+</script>
+{% endblock %}

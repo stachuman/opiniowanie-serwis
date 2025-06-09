@@ -322,7 +322,7 @@ def list_documents(request: Request,
     from fastapi.templating import Jinja2Templates
     templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-    return templates.TemplateResponse("documents.html", context)
+    return templates.TemplateResponse("documents_list.html", context)
 
 
 @router.get("/document/{doc_id}", name="document_detail")

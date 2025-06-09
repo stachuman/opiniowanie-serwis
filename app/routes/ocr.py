@@ -63,6 +63,77 @@ def document_ocr_progress(doc_id: int):
         return progress_data
 
 
+@router.get("/document/{doc_id}/ocr-status", name="document_ocr_status")
+async def get_ocr_status(doc_id: int):
+    """Zwraca status OCR dla pojedynczego dokumentu."""
+    with Session(engine) as session:
+        doc = session.get(Document, doc_id)  # ✅ Poprawna syntax SQLModel
+        if not doc:
+            raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
+
+        # ✅ Używaj istniejących pól z modelu
+        return {
+            "ocr_done": doc.ocr_status == "done",
+            "ocr_status": doc.ocr_status,
+            "ocr_progress": doc.ocr_progress or 0.0,
+            "ocr_info": doc.ocr_progress_info or ""
+        }
+
+
+@router.get("/api/opinion/{opinion_id}/ocr-status", name="opinion_ocr_status")
+async def get_opinion_ocr_status(opinion_id: int):
+    """Sprawdza status OCR wszystkich dokumentów w opinii."""
+    with Session(engine) as session:
+        # Sprawdź czy opinia istnieje
+        opinion = session.get(Document, opinion_id)
+        if not opinion or not opinion.is_main:
+            raise HTTPException(status_code=404, detail="Nie znaleziono opinii")
+
+        # Pobierz wszystkie dokumenty powiązane z opinią
+        related_docs = session.exec(
+            select(Document).where(
+                Document.parent_id == opinion_id,
+                Document.doc_type != "OCR TXT"  # Ignoruj wyniki OCR
+            )
+        ).all()
+
+        if not related_docs:
+            # Brak dokumentów - OCR "zakończony"
+            return {
+                "ocr_done": True,
+                "total_docs": 0,
+                "completed_docs": 0,
+                "pending_docs": 0,
+                "progress_overall": 1.0
+            }
+
+        # Policz statusy
+        total_docs = len(related_docs)
+        completed_docs = sum(1 for doc in related_docs if doc.ocr_status == "done")
+        pending_docs = sum(1 for doc in related_docs if doc.ocr_status in ["pending", "running"])
+        failed_docs = sum(1 for doc in related_docs if doc.ocr_status == "fail")
+
+        # Oblicz ogólny postęp
+        overall_progress = 0.0
+        for doc in related_docs:
+            if doc.ocr_status == "done":
+                overall_progress += 1.0
+            elif doc.ocr_status in ["pending", "running"]:
+                overall_progress += (doc.ocr_progress or 0.0)
+            # fail i none = 0.0
+
+        overall_progress = overall_progress / total_docs if total_docs > 0 else 0.0
+
+        return {
+            "ocr_done": pending_docs == 0 and completed_docs > 0,  # Wszystkie zakończone (nie pending)
+            "total_docs": total_docs,
+            "completed_docs": completed_docs,
+            "pending_docs": pending_docs,
+            "failed_docs": failed_docs,
+            "progress_overall": overall_progress
+        }
+
+
 @router.post("/api/document/{doc_id}/ocr-selection", name="document_ocr_selection")
 async def document_ocr_selection(request: Request, doc_id: int):
     """Zwraca OCR dla zaznaczonego fragmentu dokumentu (PDF lub obraz)."""

@@ -66,6 +66,12 @@ async def startup():
     from app.background_tasks import start_background_workers
     asyncio.create_task(start_background_workers())
 
+@app.on_event("shutdown")
+async def shutdown():
+    """Zamknięcie aplikacji - cleanup zasobów."""
+    from app.background_tasks import cleanup_background_workers
+    await cleanup_background_workers()
+    print("🛑 Aplikacja zamknięta, workery zatrzymane")
 
 # Middleware do monitorowania wydajności
 @app.middleware("http")
