@@ -81,18 +81,18 @@ def create_empty_opinion(
         request: Request,
         sygnatura: str | None = Form(None),
         doc_type: str = Form(...),
-        step: str = Form("k1")
+        step: str = Form("k1"),
+        note: str | None = Form(None)  # DODANE: parametr note
 ):
     """Utworzenie nowej pustej opinii bez dokumentu - REFACTORED."""
 
     # Deleguj całą logikę do managera
-    result = upload_manager.create_empty_opinion(sygnatura, doc_type, step)
+    result = upload_manager.create_empty_opinion(sygnatura, doc_type, step, note)  # DODANE: przekazanie note
 
     if result.success:
         return RedirectResponse(result.redirect_url, status_code=303)
     else:
         raise HTTPException(status_code=400, detail=result.error_message)
-
 
 # ==================== ENDPOINTY SZYBKIEGO OCR ====================
 

@@ -24,7 +24,7 @@
 
 {# Informacje kontekstowe #}
 {% set context_info = [
-  {'label': 'Sygnatura', 'value': opinion.sygnatura or 'Brak'},
+  {'label': 'Dotyczy', 'value': opinion.sygnatura or 'Brak'},
   {'label': 'Status', 'value': steps_dict.get(opinion.step, opinion.step), 'badge_class': 'badge bg-' + ('danger' if opinion.step == 'k1' else 'warning' if opinion.step == 'k2' else 'success' if opinion.step == 'k3' else 'secondary')},
   {'label': 'Typ dokumentu', 'value': opinion.doc_type or 'Nieznany'},
   {'label': 'Data utworzenia', 'value': opinion.upload_time.strftime('%Y-%m-%d %H:%M')}

@@ -48,21 +48,21 @@
             <input class="form-check-input" type="checkbox" name="k1" id="check_k1" 
                    {% if current_filters.k1 %}checked{% endif %}>
             <label class="form-check-label" for="check_k1">
-              <span class="badge bg-danger me-1">k1</span> Wywiad
+              <span class="badge bg-danger me-1">k1</span> Niekompletne dokumenty
             </label>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" name="k2" id="check_k2" 
                    {% if current_filters.k2 %}checked{% endif %}>
             <label class="form-check-label" for="check_k2">
-              <span class="badge bg-warning me-1">k2</span> Wyciąg z akt
+              <span class="badge bg-warning me-1">k2</span> Komplet dokumentów
             </label>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" name="k3" id="check_k3" 
                    {% if current_filters.k3 %}checked{% endif %}>
             <label class="form-check-label" for="check_k3">
-              <span class="badge bg-success me-1">k3</span> Opinia
+              <span class="badge bg-success me-1">k3</span> Word z wyciągiem wysłany
             </label>
           </div>
           <div class="form-check">
@@ -105,7 +105,7 @@
         <div class="input-group">
           <input type="text" class="form-control" name="search" 
                  value="{{ current_filters.search }}"
-                 placeholder="Nazwa pliku, sygnatura, typ dokumentu, treść...">
+                 placeholder="Nazwa pliku, dotyczy, typ dokumentu, treść...">
           <button type="submit" class="btn btn-primary">
             <i class="bi bi-search me-1"></i> Filtruj
           </button>
@@ -127,7 +127,7 @@
           </label>
         </div>
         <div class="form-text">
-          <strong>Wyszukiwanie standardowe:</strong> nazwa pliku, sygnatura, typ dokumentu<br>
+          <strong>Wyszukiwanie standardowe:</strong> nazwa pliku, dotyczy, typ dokumentu<br>
           <strong>Wyszukiwanie w treści:</strong> zawartość PDF, Word, wyników OCR<br>
           <strong>Wyszukiwanie rozmyte:</strong> znajduje podobne słowa (np. "faktura" znajdzie "fakturą")
           {% if not has_docx %}
@@ -186,7 +186,7 @@
           <tr>
             <th scope="col">ID</th>
             <th scope="col">Typ</th>
-            <th scope="col">Sygnatura</th>
+            <th scope="col">Dotyczy</th>
             <th scope="col">Rodzaj dokumentu</th>
             <th scope="col">Nazwa pliku</th>
             <th scope="col" class="text-center">Status</th>
@@ -274,7 +274,7 @@
               {% if search_matches.get(doc.id) %}
                 {% for match_type in search_matches[doc.id] %}
                   {% if match_type == 'metadata' %}
-                    <span class="badge bg-primary" title="Znaleziono w nazwie, sygnaturze lub typie">META</span>
+                    <span class="badge bg-primary" title="Znaleziono w nazwie, dotyczy lub typie">META</span>
                   {% elif match_type == 'fuzzy_metadata' %}
                     <span class="badge bg-info" title="Znaleziono rozmycie w metadanych">~META</span>
                   {% elif match_type == 'content' %}

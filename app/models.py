@@ -4,7 +4,7 @@ from sqlmodel import SQLModel, Field
 
 class Document(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    sygnatura: str | None = None
+    sygnatura: str | None = None        # zmiana, teraz przechowuje to Imię i Nazwisko osoby, której dotyczy
     doc_type: str | None = None
     original_filename: str
     stored_filename: str

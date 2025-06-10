@@ -54,7 +54,7 @@
       </div>
       <div class="col-md-6">
         <ul class="list-unstyled mb-0">
-          <li><strong>Sygnatura:</strong> {{ doc.sygnatura or "Brak" }}</li>
+          <li><strong>Dotyczy:</strong> {{ doc.sygnatura or "Brak" }}</li>
           <li><strong>Typ dokumentu:</strong> {{ doc.doc_type or "Nieznany" }}</li>
           {% if doc.last_modified %}
           <li><strong>Ostatnia modyfikacja:</strong> {{ doc.last_modified.strftime('%Y-%m-%d %H:%M') }}</li>

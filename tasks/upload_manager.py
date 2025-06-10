@@ -256,7 +256,8 @@ class UploadManager:
     def create_empty_opinion(
             sygnatura: Optional[str],
             doc_type: str,
-            step: str = "k1"
+            step: str = "k1",
+            note: Optional[str] = None  # DODANE: parametr note
     ) -> UploadResult:
         """
         Tworzy pustą opinię bez dokumentu.
@@ -276,6 +277,7 @@ class UploadManager:
                 content_type="opinion",
                 doc_type=doc_type,
                 sygnatura=sygnatura,
+                note=note.strip() if note else None,  # DODANE: zapisanie notatki
                 creator=None  # TODO: current_user
             )
             session.add(opinion)
@@ -287,7 +289,6 @@ class UploadManager:
             uploaded_doc_ids=[opinion_id],
             redirect_url=f"/opinion/{opinion_id}"
         )
-
     @staticmethod
     async def _get_or_create_unassigned_container() -> int:
         """

@@ -200,9 +200,9 @@ def opinion_detail(request: Request, doc_id: int):
                 grouped_docs[doc_type] = []
             grouped_docs[doc_type].append(doc)
 
-        steps = [("k1", "k1 – Wywiad"),
-                 ("k2", "k2 – Wyciąg z akt"),
-                 ("k3", "k3 – Opinia"),
+        steps = [("k1", "k1 – Niekompletne dokumenty"),
+                 ("k2", "k2 – Komplet dokumentów"),
+                 ("k3", "k3 – Word z wyciągiem wysłany"),
                  ("k4", "k4 – Archiwum")]
 
         # Zbuduj nawigację za pomocą helpera
@@ -219,9 +219,9 @@ def opinion_detail(request: Request, doc_id: int):
             "grouped_docs": grouped_docs,
             "steps": steps,
             "steps_dict": {  # DODANE: Mapowanie kroków
-                "k1": "k1 – Wywiad",
-                "k2": "k2 – Wyciąg z akt",
-                "k3": "k3 – Opinia",
+                "k1": "k1 – Niekompletne dokumenty",
+                "k2": "k2 – Komplet dokumentów",
+                "k3": "k3 – Word z wyciągiem wysłany",
                 "k4": "k4 – Archiwum"
             },
             "title": navigation['page_title'],
@@ -243,8 +243,8 @@ def opinion_detail(request: Request, doc_id: int):
 @router.post("/opinion/{doc_id}/update", name="opinion_update")
 def opinion_update(request: Request, doc_id: int,
                    step: str = Form(...),
-                   sygnatura: str | None = Form(None),
-                   note: str | None = Form(None)):
+                   sygnatura: str | None = Form(None)):
+                   # note: str | None = Form(None)):
     """Aktualizacja statusu opinii."""
     with Session(engine) as session:
         opinion = session.get(Document, doc_id)
@@ -254,7 +254,7 @@ def opinion_update(request: Request, doc_id: int,
         # Aktualizuj pola
         opinion.step = step
         opinion.sygnatura = sygnatura or None
-        opinion.note = note or None
+        # opinion.note = note or None
         opinion.last_modified = datetime.now()
         # opinion.last_modified_by = current_user  # Gdy będzie system użytkowników
 
@@ -267,22 +267,51 @@ def opinion_update(request: Request, doc_id: int,
 @router.post("/opinion/{doc_id}/update-note", name="opinion_update_note")
 def opinion_update_note(request: Request, doc_id: int, note: str = Form("")):
     """Aktualizacja notatki do opinii."""
+
+    # Sprawdź czy to request AJAX
+    accept_header = request.headers.get("accept", "")
+    is_ajax = "application/json" in accept_header or "text/javascript" in accept_header
+
+    # Przechowaj notatkę do zwrócenia
+    updated_note = None
+
     with Session(engine) as session:
         opinion = session.get(Document, doc_id)
         if not opinion or not opinion.is_main:
-            raise HTTPException(status_code=404, detail="Nie znaleziono opinii")
+            if is_ajax:
+                return {"success": False, "error": "Nie znaleziono opinii"}
+            else:
+                raise HTTPException(status_code=404, detail="Nie znaleziono opinii")
 
         # Aktualizuj notatkę
         opinion.note = note.strip() or None
         opinion.last_modified = datetime.now()
-        # opinion.last_modified_by = current_user  # Gdy będzie system użytkowników
+        updated_note = opinion.note
 
         session.add(opinion)
         session.commit()
 
-    # Skonwertuj URL do stringa przed dodaniem parametrów
-    base_url = str(request.url_for("list_opinions"))
-    return RedirectResponse(
-        f"{base_url}?note_updated=true",
-        status_code=303
-    )
+    if is_ajax:
+        # Dla requestów AJAX zwróć JSON
+        return {
+            "success": True,
+            "message": "Notatka została zaktualizowana",
+            "doc_id": doc_id,
+            "note": updated_note
+        }
+    else:
+        # Dla zwykłych form-ów - inteligentne przekierowanie
+        referer = request.headers.get("referer", "")
+
+        if f"/opinion/{doc_id}" in referer:
+            # Jeśli przyszedł ze strony szczegółów opinii
+            return RedirectResponse(
+                request.url_for("opinion_detail", doc_id=doc_id),
+                status_code=303
+            )
+        else:
+            # Jeśli przyszedł z listy opinii lub innej strony
+            return RedirectResponse(
+                str(request.url_for("list_opinions")) + "?note_updated=true",
+                status_code=303
+            )

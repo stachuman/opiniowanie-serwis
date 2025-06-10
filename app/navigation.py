@@ -243,7 +243,7 @@ def build_opinion_navigation(request: Request, opinion: Document,
     }.get(opinion.step, 'bg-secondary')
 
     context_info = (ContextInfoBuilder()
-                    .add_info("Sygnatura", opinion.sygnatura or "Brak")
+                    .add_info("Dotyczy", opinion.sygnatura or "Brak")
                     .add_info("Status", f"{opinion.step}", step_class)
                     .add_info("Typ dokumentu", opinion.doc_type or "Nie określono")
                     .add_info("Data utworzenia",
@@ -710,7 +710,7 @@ def build_opinion_navigation(request: Request, opinion: Document,
     step_icon = get_step_icon(opinion.step)
 
     context_info = (ContextInfoBuilder()
-                    .add_info("Sygnatura", opinion.sygnatura or "Brak")
+                    .add_info("Dotyczy", opinion.sygnatura or "Brak")
                     .add_info("Status", f"{opinion.step}", step_class)
                     .add_info("Typ dokumentu", opinion.doc_type or "Nie określono")
                     .add_info("Data utworzenia",

@@ -32,21 +32,21 @@
             <input class="form-check-input" type="checkbox" name="k1" id="filter_k1"
                    {% if current_filters.k1 %}checked{% endif %}>
             <label class="form-check-label" for="filter_k1">
-              <span class="badge bg-danger me-1">k1</span> Wywiad
+              <span class="badge bg-danger me-1">k1</span> Niekompletne dokumenty
             </label>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" name="k2" id="filter_k2"
                    {% if current_filters.k2 %}checked{% endif %}>
             <label class="form-check-label" for="filter_k2">
-              <span class="badge bg-warning me-1">k2</span> Wyciąg z akt
+              <span class="badge bg-warning me-1">k2</span> Komplet dokumentów
             </label>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" name="k3" id="filter_k3"
                    {% if current_filters.k3 %}checked{% endif %}>
             <label class="form-check-label" for="filter_k3">
-              <span class="badge bg-success me-1">k3</span> Opinia
+              <span class="badge bg-success me-1">k3</span> Word z wyciągiem wysłany
             </label>
           </div>
           <div class="form-check">
@@ -64,7 +64,7 @@
         <label class="form-label">Wyszukiwanie</label>
         <div class="input-group">
           <input type="text" class="form-control" name="search" id="search"
-                 placeholder="Nazwa pliku, sygnatura, notatka..."
+                 placeholder="Nazwa pliku, dotyczy, notatka..."
                  value="{{ current_filters.search }}">
           <button class="btn btn-primary" type="submit">
             <i class="bi bi-search me-1"></i>Filtruj
@@ -91,7 +91,7 @@
           </div>
         </div>
         <div class="form-text">
-          <strong>Wyszukiwanie standardowe:</strong> nazwa pliku, sygnatura, notatka<br>
+          <strong>Wyszukiwanie standardowe:</strong> nazwa pliku, dotyczy, notatka<br>
           <strong>Wyszukiwanie w treści:</strong> zawartość PDF, Word, wyników OCR<br>
           <strong>Wyszukiwanie rozmyte:</strong> znajduje podobne słowa
           {% if not has_docx %}
@@ -196,7 +196,7 @@
           <thead class="table-light">
             <tr>
               <th scope="col" width="50">Typ</th>
-              <th scope="col" width="120">Sygnatura</th>
+              <th scope="col" width="120">Dotyczy</th>
               <th scope="col" width="150">Typ dok.</th>
               <th scope="col">Nazwa pliku</th>
               <th scope="col" width="200">Notatka</th>

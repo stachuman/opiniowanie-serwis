@@ -335,9 +335,9 @@ def document_detail(request: Request, doc_id: int):
     # Zbuduj nawigację
     navigation = build_document_navigation(request, result.document, None, result.parent_opinion)
 
-    steps = [("k1", "k1 – Wywiad"),
-             ("k2", "k2 – Wyciąg z akt"),
-             ("k3", "k3 – Opinia"),
+    steps = [("k1", "k1 – Niekompletne dokumenty"),
+             ("k2", "k2 – Komplet dokumentów"),
+             ("k3", "k3 – Word z wyciągiem wysłany"),
              ("k4", "k4 – Archiwum")]
 
     # Kontekst odpowiedzi
@@ -441,7 +441,7 @@ def documents_export_csv(request: Request,
 
     # Nagłówki
     writer.writerow([
-        'ID', 'Typ', 'Sygnatura', 'Rodzaj dokumentu', 'Nazwa pliku',
+        'ID', 'Typ', 'Dotyczy', 'Rodzaj dokumentu', 'Nazwa pliku',
         'Status', 'OCR', 'Data dodania', 'Ostatnia modyfikacja'
     ])
 

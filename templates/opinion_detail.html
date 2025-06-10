@@ -24,7 +24,7 @@
 
 {# Informacje kontekstowe #}
 {% set context_info = [
-  {'label': 'Sygnatura', 'value': opinion.sygnatura or 'Brak'},
+  {'label': 'Dotyczy', 'value': opinion.sygnatura or 'Brak'},
   {'label': 'Status', 'value': steps_dict.get(opinion.step, opinion.step), 'badge_class': 'badge bg-' + ('danger' if opinion.step == 'k1' else 'warning' if opinion.step == 'k2' else 'success' if opinion.step == 'k3' else 'secondary')},
   {'label': 'Typ dokumentu', 'value': opinion.doc_type or 'Nieznany'},
   {'label': 'Data utworzenia', 'value': opinion.upload_time.strftime('%Y-%m-%d %H:%M')}
@@ -98,16 +98,16 @@
 <div class="card mb-4">
   <div class="card-header bg-light">
     <h5 class="card-title mb-0">
-      <i class="bi bi-pencil me-2"></i>Edycja sygnatury i statusu
+      <i class="bi bi-pencil me-2"></i>Edycja informacji podstawowych
     </h5>
   </div>
   <div class="card-body">
     <form method="post" action="{{ url_for('opinion_update', doc_id=opinion.id) }}">
       <div class="row mb-3">
         <div class="col-md-4">
-          <label for="sygnatura" class="form-label">Sygnatura sprawy</label>
+          <label for="sygnatura" class="form-label">Dotyczy (imię i nazwisko)</label>
           <input type="text" class="form-control" id="sygnatura" name="sygnatura"
-                 value="{{ opinion.sygnatura or '' }}" placeholder="Np. IV K 123/23">
+                 value="{{ opinion.sygnatura or '' }}" placeholder="Np. Jan Kowalski">
         </div>
         <div class="col-md-4">
           <label for="step" class="form-label">Status sprawy</label>

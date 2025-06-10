@@ -1,14 +1,8 @@
-<!-- templates/opinions.html - REFAKTORYZOWANA -->
+<!-- templates/opinions.html - CZYSTY TEMPLATE -->
 {% extends 'base.html' %}
 
 {% set page_type = 'opinions_list' %}
 {% set page_title = 'Lista opinii sądowych' %}
-
-{% set page_actions = [
-  {'name': 'Dodaj przez Word', 'url': url_for('upload_form'), 'icon': 'file-earmark-word', 'class': 'btn-primary'},
-  {'name': 'Utwórz pustą opinię', 'url': url_for('create_empty_opinion_form'), 'icon': 'plus-circle', 'class': 'btn-success'},
-  {'name': 'Szybki OCR', 'url': url_for('quick_ocr_form'), 'icon': 'lightning', 'class': 'btn-info'}
-] %}
 
 {% block content %}
 <!-- Alerty -->
@@ -18,6 +12,7 @@
   <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 {% endif %}
+
 {% if request.query_params.get('note_updated') %}
 <div class="alert alert-success alert-dismissible fade show mb-4">
   <i class="bi bi-check-circle-fill me-2"></i> Notatka została zaktualizowana
@@ -41,21 +36,21 @@
             <input class="form-check-input" type="checkbox" name="k1" id="check_k1"
                    {% if current_filters.k1 %}checked{% endif %}>
             <label class="form-check-label" for="check_k1">
-              <span class="badge bg-danger me-1">k1</span> Wywiad
+              <span class="badge bg-danger me-1">k1</span> Niekompletne dokumenty
             </label>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" name="k2" id="check_k2"
                    {% if current_filters.k2 %}checked{% endif %}>
             <label class="form-check-label" for="check_k2">
-              <span class="badge bg-warning me-1">k2</span> Wyciąg z akt
+              <span class="badge bg-warning me-1">k2</span> Komplet dokumentów
             </label>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" name="k3" id="check_k3"
                    {% if current_filters.k3 %}checked{% endif %}>
             <label class="form-check-label" for="check_k3">
-              <span class="badge bg-success me-1">k3</span> Opinia
+              <span class="badge bg-success me-1">k3</span> Word z wyciągiem wysłany
             </label>
           </div>
           <div class="form-check">
@@ -67,16 +62,18 @@
           </div>
         </div>
       </div>
+
       <div class="col-md-6">
         <label class="form-label">Wyszukiwanie</label>
         <div class="input-group">
           <input type="text" class="form-control" name="search"
                  value="{{ current_filters.search }}"
-                 placeholder="Sygnatura, nazwa pliku, treść dokumentów...">
+                 placeholder="Dotyczy, nazwa pliku, treść dokumentów...">
           <button type="submit" class="btn btn-primary">
             <i class="bi bi-search me-1"></i> Filtruj
           </button>
         </div>
+
         <div class="form-check mt-2">
           <input class="form-check-input" type="checkbox" name="search_content" id="search_content"
                  {% if current_filters.search_content %}checked{% endif %}>
@@ -85,6 +82,7 @@
             <small class="text-muted">(PDF, Word, OCR)</small>
           </label>
         </div>
+
         <div class="form-check mt-1">
           <input class="form-check-input" type="checkbox" name="fuzzy_search" id="fuzzy_search"
                  {% if current_filters.fuzzy_search %}checked{% endif %}>
@@ -93,8 +91,9 @@
             <small class="text-muted">(ignoruje błędy pisowni, znaki diakrytyczne)</small>
           </label>
         </div>
+
         <div class="form-text">
-          <strong>Wyszukiwanie standardowe:</strong> sygnatura, nazwa pliku<br>
+          <strong>Wyszukiwanie standardowe:</strong> dotyczy, nazwa pliku<br>
           <strong>Wyszukiwanie w treści:</strong> zawartość PDF, Word, wyników OCR<br>
           <strong>Wyszukiwanie rozmyte:</strong> znajduje podobne słowa (np. "Kowalski" znajdzie "Kowalśki")
           {% if not has_docx %}
@@ -105,6 +104,7 @@
           {% endif %}
         </div>
       </div>
+
       <div class="col-12">
         <div class="d-flex gap-2">
           <a href="{{ url_for('list_opinions') }}" class="btn btn-outline-secondary">
@@ -141,12 +141,13 @@
       </span>
     </div>
   </div>
+
   <div class="card-body p-0">
     <div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
           <tr>
-            <th scope="col">Sygnatura</th>
+            <th scope="col">Dotyczy</th>
             <th scope="col">Nazwa pliku</th>
             <th scope="col">Notatka</th>
             <th scope="col" class="text-center">Status</th>
@@ -161,23 +162,32 @@
               {% if opinion.sygnatura %}
                 <strong>{{ opinion.sygnatura }}</strong>
               {% else %}
-                <span class="text-muted">Brak sygnatury</span>
+                <span class="text-muted">Brak informacji, kogo dotyczy</span>
               {% endif %}
             </td>
             <td>{{ opinion.original_filename }}</td>
             <td>
               {% if opinion.note %}
-                <span class="text-muted">{{ opinion.note }}</span>
+                <div class="d-flex align-items-center">
+                  <span class="text-muted me-2">{{ opinion.note[:50] }}{% if opinion.note|length > 50 %}...{% endif %}</span>
+                  <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 edit-note-btn"
+                          data-doc-id="{{ opinion.id }}"
+                          data-current-note="{{ opinion.note|e }}"
+                          title="Edytuj notatkę">
+                    <i class="bi bi-pencil-square"></i>
+                  </button>
+                </div>
               {% else %}
-                <span class="text-muted small"><em>Brak notatki</em></span>
+                <div class="d-flex align-items-center">
+                  <span class="text-muted small me-2"><em>Brak notatki</em></span>
+                  <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 edit-note-btn"
+                          data-doc-id="{{ opinion.id }}"
+                          data-current-note=""
+                          title="Dodaj notatkę">
+                    <i class="bi bi-plus-circle"></i>
+                  </button>
+                </div>
               {% endif %}
-              <button type="button" class="btn btn-sm btn-outline-secondary ms-2 py-0 px-1 edit-note-btn"
-                      data-doc-id="{{ opinion.id }}"
-                      data-current-note="{{ opinion.note|default('', true) }}"
-                      onclick="event.stopPropagation()"
-                      title="Edytuj notatkę">
-                <i class="bi bi-pencil-square"></i>
-              </button>
             </td>
             <td class="text-center">
               {% if opinion.step == 'k1' %}
@@ -209,7 +219,6 @@
                 <button class="btn btn-sm btn-outline-secondary quick-preview-btn"
                         data-doc-id="{{ opinion.id }}"
                         data-doc-name="{{ opinion.original_filename }}"
-                        onclick="event.stopPropagation()"
                         title="Szybki podgląd">
                   <i class="bi bi-eye"></i>
                 </button>
@@ -286,99 +295,4 @@
     </div>
   </div>
 </div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-  // Event listenery dla filtrów (podobnie jak w index.html)
-
-  // Przyciski zaznacz/odznacz wszystkie
-  document.getElementById('selectAllBtn').addEventListener('click', function() {
-    const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
-    checkboxes.forEach(checkbox => checkbox.checked = true);
-  });
-
-  document.getElementById('deselectAllBtn').addEventListener('click', function() {
-    const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
-    checkboxes.forEach(checkbox => checkbox.checked = false);
-  });
-
-  // Auto-submit formularza przy zmianie filtrów
-  const form = document.getElementById('opinionsFilterForm');
-  const checkboxes = form.querySelectorAll('input[type="checkbox"][name^="k"]');
-  const searchContentCheckbox = form.querySelector('input[name="search_content"]');
-  const fuzzySearchCheckbox = form.querySelector('input[name="fuzzy_search"]');
-
-  checkboxes.forEach(checkbox => {
-    checkbox.addEventListener('change', function() {
-      clearTimeout(window.filterTimeout);
-      window.filterTimeout = setTimeout(() => form.submit(), 500);
-    });
-  });
-
-  if (searchContentCheckbox) {
-    searchContentCheckbox.addEventListener('change', function() {
-      const searchInput = form.querySelector('input[name="search"]');
-      if (this.checked && searchInput.value.trim()) {
-        if (confirm('Wyszukiwanie w treści dokumentów może być wolne. Kontynuować?')) {
-          form.submit();
-        } else {
-          this.checked = false;
-        }
-      } else if (!this.checked) {
-        form.submit();
-      }
-    });
-  }
-
-  if (fuzzySearchCheckbox) {
-    fuzzySearchCheckbox.addEventListener('change', function() {
-      const searchInput = form.querySelector('input[name="search"]');
-      if (searchInput.value.trim()) {
-        form.submit();
-      }
-    });
-  }
-
-  // Enter w polu wyszukiwania
-  const searchInput = form.querySelector('input[name="search"]');
-  if (searchInput) {
-    searchInput.addEventListener('keypress', function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        form.submit();
-      }
-    });
-  }
-
-  // Obsługa przycisków edycji notatki - używa modalManager
-  document.addEventListener('click', function(e) {
-    const editBtn = e.target.closest('.edit-note-btn');
-    if (!editBtn) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    const docId = editBtn.getAttribute('data-doc-id');
-    const currentNote = editBtn.getAttribute('data-current-note');
-
-    // Użyj nowego modalManager
-    window.modalManager.showNoteEdit(docId, currentNote, true); // true = isOpinion
-  });
-
-  // Obsługa przycisków szybkiego podglądu - używa modalManager
-  document.addEventListener('click', function(e) {
-    const previewBtn = e.target.closest('.quick-preview-btn');
-    if (!previewBtn) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    const docId = previewBtn.getAttribute('data-doc-id');
-    const docName = previewBtn.getAttribute('data-doc-name');
-
-    // Użyj nowego modalManager
-    window.modalManager.showDocumentPreview(docId, docName);
-  });
-});
-</script>
 {% endblock %}
