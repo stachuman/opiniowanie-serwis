@@ -403,29 +403,29 @@ def build_preview_navigation(request: Request, document: Document,
                              session: Session, preview_type: str) -> Dict[str, Any]:
     """
     Zbuduj nawigację dla wszystkich typów podglądu (PDF, Word, Image).
-
-    Args:
-        request: FastAPI Request
-        document: Dokument do podglądu
-        session: Sesja bazy danych
-        preview_type: Typ podglądu ('pdf', 'word', 'image')
-
-    Returns:
-        Słownik z kompletną nawigacją
     """
-    # Pobierz opinię nadrzędną jeśli istnieje
+    # POPRAWKA: Pobierz opinię nadrzędną - sprawdź parent_id LUB czy to dokument główny
     parent_opinion = None
     if document.parent_id:
         parent_opinion = session.get(Document, document.parent_id)
+    elif document.is_main:
+        # Jeśli to dokument główny opinii, użyj jego samego jako "opinia"
+        parent_opinion = document
 
     # Breadcrumbs
     breadcrumbs = BreadcrumbBuilder(request)
 
     if parent_opinion:
-        breadcrumbs.add_home().add_opinion(parent_opinion).add_document(document)
+        if document.is_main:
+            # Dla dokumentu głównego: Lista opinii -> Opinia -> Podgląd
+            breadcrumbs.add_home().add_opinion(parent_opinion)
+        else:
+            # Dla dokumentu związanego: Lista opinii -> Opinia -> Dokument
+            breadcrumbs.add_home().add_opinion(parent_opinion).add_document(document)
     else:
+        # Dokument samodzielny
         breadcrumbs.add_documents().add_document(document)
-
+    
     # Dodaj odpowiedni breadcrumb dla typu podglądu
     preview_configs = {
         'pdf': ('Podgląd PDF', 'file-earmark-pdf'),

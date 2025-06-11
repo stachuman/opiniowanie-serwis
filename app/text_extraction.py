@@ -10,6 +10,8 @@ from pathlib import Path
 from app.db import FILES_DIR, engine
 from app.models import Document
 from tasks.ocr.config import logger
+import subprocess
+import shutil
 
 # Próba importu biblioteki python-docx
 try:
@@ -18,6 +20,12 @@ try:
     HAS_DOCX = True
 except ImportError:
     HAS_DOCX = False
+
+try:
+    import docx2txt
+    HAS_DOCX2TXT = True
+except ImportError:
+    HAS_DOCX2TXT = False
 
 # Cache dla wyekstraktowanych tekstów
 extracted_text_cache = {}
@@ -53,21 +61,86 @@ def extract_text_from_pdf(file_path):
 
 
 def extract_text_from_word(file_path):
-    """Wyciąga tekst z dokumentu Word używając python-docx."""
-    if not HAS_DOCX:
-        logger.warning("Brak biblioteki DOCX")
-        return ""
+    """Wyciąga tekst z dokumentu Word - obsługuje wszystkie formaty."""
 
-    try:
-        doc = DocxDocument(file_path)
-        text = ""
-        for paragraph in doc.paragraphs:
-            text += paragraph.text + "\n"
-        return text.strip()
-    except Exception as e:
-        logger.warning(f"Nie można wyciągnąć tekstu z Word {file_path}: {str(e)}")
-        return ""
+    # Metoda 1: Spróbuj jako .docx (nowy format)
+    if HAS_DOCX:
+        try:
+            doc = DocxDocument(file_path)
+            text = ""
+            for paragraph in doc.paragraphs:
+                text += paragraph.text + "\n"
+            logger.info(f"✅ Pomyślnie odczytano .docx: {file_path}")
+            return text.strip()
+        except Exception as docx_error:
+            logger.info(f"📄 Nie udało się odczytać jako .docx: {docx_error}")
 
+    # Metoda 2: Spróbuj przez antiword (najlepsza dla starych .doc)
+    if shutil.which('antiword'):  # Sprawdź czy antiword jest zainstalowany
+        try:
+            result = subprocess.run(
+                ['antiword', '-t', str(file_path)],  # -t = plain text output
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='ignore',
+                timeout=30  # Timeout 30 sekund
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                text = result.stdout.strip()
+                logger.info(f"✅ Pomyślnie odczytano przez antiword: {file_path} ({len(text)} znaków)")
+                return text
+            else:
+                logger.info(f"📄 Antiword nie może odczytać: {file_path} (returncode: {result.returncode})")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"⏱️ Antiword timeout dla: {file_path}")
+        except Exception as antiword_error:
+            logger.info(f"📄 Błąd antiword: {antiword_error}")
+    else:
+        logger.info("📄 Antiword nie jest zainstalowany - pomiń starsze pliki .doc")
+
+    # Metoda 3: Spróbuj python-docx2txt (backup)
+    if HAS_DOCX2TXT:
+        try:
+            text = docx2txt.process(file_path)
+            if text and text.strip():
+                logger.info(f"✅ Pomyślnie odczytano przez docx2txt: {file_path}")
+                return text.strip()
+        except Exception as doc_error:
+            logger.info(f"📄 Nie udało się odczytać przez docx2txt: {doc_error}")
+
+    # Metoda 4: Ostatnia szansa - catdoc (jeśli dostępny)
+    if shutil.which('catdoc'):
+        try:
+            result = subprocess.run(
+                ['catdoc', str(file_path)],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='ignore',
+                timeout=30
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                text = result.stdout.strip()
+                logger.info(f"✅ Pomyślnie odczytano przez catdoc: {file_path}")
+                return text
+        except Exception as catdoc_error:
+            logger.info(f"📄 Błąd catdoc: {catdoc_error}")
+
+    # Jeśli nic nie zadziałało
+    missing_tools = []
+    if not HAS_DOCX: missing_tools.append("python-docx")
+    if not HAS_DOCX2TXT: missing_tools.append("python-docx2txt")
+    if not shutil.which('antiword'): missing_tools.append("antiword")
+
+    error_msg = f"Nie można odczytać dokumentu Word. "
+    if missing_tools:
+        error_msg += f"Brakujące narzędzia: {', '.join(missing_tools)}"
+
+    logger.warning(f"❌ {error_msg}: {file_path}")
+    return f"[BŁĄD ODCZYTU] {error_msg}\n\nAby odczytać ten plik, zainstaluj: sudo apt-get install antiword"
 
 def get_ocr_text_for_document(doc_id, session):
     """Pobiera tekst OCR dla danego dokumentu - NAJNOWSZY dokument OCR."""

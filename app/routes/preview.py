@@ -3,8 +3,8 @@
 Endpointy związane z podglądem dokumentów (PDF, Word, Image, Text).
 """
 
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi import APIRouter, Request, HTTPException, Query  # ← DODANE: Query
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session
 from datetime import datetime
@@ -25,7 +25,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @router.get("/document/{doc_id}/preview", name="document_preview")
-def document_preview(request: Request, doc_id: int):
+def document_preview(request: Request, doc_id: int, embedded: bool = Query(False)):  # ← DODANE: embedded parameter
     """Podgląd dokumentu bezpośrednio w przeglądarce - przekierowuje do odpowiedniego typu."""
     with Session(engine) as session:
         doc = session.get(Document, doc_id)
@@ -53,6 +53,21 @@ def document_preview(request: Request, doc_id: int):
     if mime_type and (mime_type == 'application/pdf'):
         return FileResponse(file_path, media_type="application/pdf")
 
+    # ← DODANE: Dla embedded view, zwracaj bezpośrednio pliki Word i Text
+    if embedded and mime_type and 'word' in mime_type:
+        # Zwróć wyekstraktowany tekst z Word zamiast surowego pliku
+        try:
+            extracted_text = extract_text_from_word(file_path)
+            if not extracted_text:
+                extracted_text = "Dokument Word jest pusty lub nie zawiera tekstu"
+            return HTMLResponse(
+                content=f"<pre style='white-space: pre-wrap; font-family: system-ui; padding: 1rem;'>{extracted_text}</pre>")
+        except Exception as e:
+            return HTMLResponse(content=f"<div style='color: red; padding: 1rem;'>Błąd odczytu Word: {str(e)}</div>")
+
+    if embedded and (mime_type == 'text/plain' or doc.original_filename.lower().endswith('.txt')):
+        return FileResponse(file_path, filename=doc.original_filename, media_type=mime_type)
+    
     # Dla dokumentów Word przekieruj do word-preview
     if mime_type and 'word' in mime_type:
         return RedirectResponse(
@@ -71,6 +86,7 @@ def document_preview(request: Request, doc_id: int):
     )
 
 
+# RESZTA KODU POZOSTAJE IDENTYCZNA - KOPIUJ 1:1 Z ORYGINAŁU
 @router.get("/document/{doc_id}/text-preview", name="document_text_preview")
 def document_text_preview(request: Request, doc_id: int):
     """Podgląd pliku tekstowego w formacie HTML."""

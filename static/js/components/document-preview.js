@@ -1,6 +1,6 @@
 /**
- * Uproszczony komponent podglądu dokumentów
- * Usunięto niepotrzebne funkcje zoom, fullscreen oraz skomplikowane interakcje
+ * Uproszczony komponent podglądu dokumentów z obsługą embedded view
+ * Rozwiązuje problem zagnieżdżania widoków przez dodanie parametru ?embedded=true
  */
 
 class DocumentPreview {
@@ -20,6 +20,7 @@ class DocumentPreview {
       previewUrl: options.previewUrl || `/document/${options.docId}/preview`,
       downloadUrl: options.downloadUrl || `/document/${options.docId}/download`,
       height: options.height || '600px',
+      embedded: options.embedded !== false, // Domyślnie true dla embedded view
       ...options
     };
 
@@ -75,17 +76,22 @@ class DocumentPreview {
     this.container.className += ' document-preview-container';
     this.container.style.position = 'relative';
 
-    // Toolbar z przyciskiem pobierania
-    this.elements.toolbar = this.createToolbar();
-    this.container.appendChild(this.elements.toolbar);
+    // Dla embedded view nie pokazujemy toolbar (treść ma swój własny)
+    if (!this.config.embedded || this.config.docType === 'pdf' || this.config.docType === 'image') {
+      // Toolbar z przyciskiem pobierania
+      this.elements.toolbar = this.createToolbar();
+      this.container.appendChild(this.elements.toolbar);
+    }
 
     // Preview area
     this.elements.previewArea = this.createPreviewArea();
     this.container.appendChild(this.elements.previewArea);
 
-    // Status bar
-    this.elements.statusBar = this.createStatusBar();
-    this.container.appendChild(this.elements.statusBar);
+    // Status bar - tylko dla non-embedded view
+    if (!this.config.embedded || this.config.docType === 'pdf' || this.config.docType === 'image') {
+      this.elements.statusBar = this.createStatusBar();
+      this.container.appendChild(this.elements.statusBar);
+    }
   }
 
   /**
@@ -124,7 +130,15 @@ class DocumentPreview {
 
     // Kontener na treść
     const contentContainer = document.createElement('div');
-    contentContainer.className = 'preview-content d-flex justify-content-center align-items-center h-100';
+
+    // Dla embedded view usuń centrowanie i wypełnienie
+    if (this.config.embedded && (this.config.docType === 'word' || this.config.docType === 'text')) {
+      contentContainer.className = 'preview-content h-100';
+      contentContainer.style.padding = '0';
+    } else {
+      contentContainer.className = 'preview-content d-flex justify-content-center align-items-center h-100';
+    }
+
     previewArea.appendChild(contentContainer);
 
     this.elements.contentContainer = contentContainer;
@@ -154,6 +168,20 @@ class DocumentPreview {
     this.state.isLoading = false;
   }
 
+  /**
+   * Buduje URL dla podglądu z odpowiednimi parametrami
+   */
+  buildPreviewUrl() {
+    let url = this.config.previewUrl;
+
+    // JEDYNA ZMIANA: Dla Word i text dokumentów w embedded view dodaj parametr
+    if (this.config.embedded && (this.config.docType === 'word' || this.config.docType === 'text')) {
+      const separator = url.includes('?') ? '&' : '?';
+      url += `${separator}embedded=true`;
+    }
+
+    return url;
+  }
   /**
    * Ładuje podgląd dokumentu
    */
@@ -189,10 +217,11 @@ class DocumentPreview {
    * Ładuje podgląd PDF
    */
   async loadPdfPreview() {
-    console.log('Loading PDF preview from:', this.config.previewUrl);
+    const previewUrl = this.buildPreviewUrl();
+    console.log('Loading PDF preview from:', previewUrl);
 
     const iframe = document.createElement('iframe');
-    iframe.src = this.config.previewUrl;
+    iframe.src = previewUrl;
     iframe.style.cssText = `
       width: 100%;
       height: 100%;
@@ -231,10 +260,11 @@ class DocumentPreview {
    * Ładuje podgląd obrazu
    */
   async loadImagePreview() {
-    console.log('Loading image preview from:', this.config.previewUrl);
+    const previewUrl = this.buildPreviewUrl();
+    console.log('Loading image preview from:', previewUrl);
 
     const img = document.createElement('img');
-    img.src = this.config.previewUrl;
+    img.src = previewUrl;
     img.style.cssText = `
       max-width: 100%;
       max-height: 100%;
@@ -273,84 +303,133 @@ class DocumentPreview {
    * Ładuje podgląd dokumentu Word
    */
   async loadWordPreview() {
-    console.log('Loading Word preview from:', this.config.previewUrl);
+    const previewUrl = this.buildPreviewUrl();
+    console.log('Loading Word preview from:', previewUrl);
 
-    const iframe = document.createElement('iframe');
-    iframe.src = this.config.previewUrl;
-    iframe.style.cssText = `
-      width: 100%;
-      height: 100%;
-      border: none;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-    `;
+    if (this.config.embedded) {
+      // Dla embedded view ładuj bezpośrednio HTML
+      try {
+        const response = await fetch(previewUrl);
 
-    this.elements.contentContainer.innerHTML = '';
-    this.elements.contentContainer.appendChild(iframe);
-    this.elements.previewElement = iframe;
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
 
-    // Oznacz jako załadowane natychmiast dla Word docs
-    this.finishLoading();
+        const htmlContent = await response.text();
 
-    const hideLoaderTimeout = setTimeout(() => {
-      this.updateStatus('<i class="bi bi-check-circle me-1"></i>Dokument Word załadowany');
-    }, 1000);
+        this.elements.contentContainer.innerHTML = htmlContent;
+        this.elements.previewElement = this.elements.contentContainer.firstElementChild;
 
-    iframe.onload = () => {
-      clearTimeout(hideLoaderTimeout);
-      this.updateStatus('<i class="bi bi-check-circle me-1"></i>Dokument Word załadowany');
-    };
+        this.finishLoading();
+        this.updateStatus('<i class="bi bi-check-circle me-1"></i>Dokument Word załadowany');
 
-    iframe.onerror = () => {
-      clearTimeout(hideLoaderTimeout);
-      console.error('Error loading Word document');
-      this.showError('Nie udało się załadować dokumentu Word');
-    };
+      } catch (error) {
+        console.error('Error loading embedded Word preview:', error);
+        this.showError('Nie udało się załadować dokumentu Word: ' + error.message);
+      }
+    } else {
+      // Dla non-embedded view użyj iframe
+      const iframe = document.createElement('iframe');
+      iframe.src = previewUrl;
+      iframe.style.cssText = `
+        width: 100%;
+        height: 100%;
+        border: none;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      `;
+
+      this.elements.contentContainer.innerHTML = '';
+      this.elements.contentContainer.appendChild(iframe);
+      this.elements.previewElement = iframe;
+
+      // Oznacz jako załadowane natychmiast dla Word docs
+      this.finishLoading();
+
+      const hideLoaderTimeout = setTimeout(() => {
+        this.updateStatus('<i class="bi bi-check-circle me-1"></i>Dokument Word załadowany');
+      }, 1000);
+
+      iframe.onload = () => {
+        clearTimeout(hideLoaderTimeout);
+        this.updateStatus('<i class="bi bi-check-circle me-1"></i>Dokument Word załadowany');
+      };
+
+      iframe.onerror = () => {
+        clearTimeout(hideLoaderTimeout);
+        console.error('Error loading Word document');
+        this.showError('Nie udało się załadować dokumentu Word');
+      };
+    }
   }
 
   /**
    * Ładuje podgląd tekstu
    */
   async loadTextPreview() {
-    console.log('Loading text preview from:', this.config.previewUrl);
+    const previewUrl = this.buildPreviewUrl();
+    console.log('Loading text preview from:', previewUrl);
 
     // Oznacz jako załadowane natychmiast
     this.finishLoading();
 
-    try {
-      const response = await fetch(this.config.previewUrl);
+    if (this.config.embedded) {
+      // Dla embedded view ładuj bezpośrednio HTML
+      try {
+        const response = await fetch(previewUrl);
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const htmlContent = await response.text();
+
+        this.elements.contentContainer.innerHTML = htmlContent;
+        this.elements.previewElement = this.elements.contentContainer.firstElementChild;
+
+        this.updateStatus('<i class="bi bi-check-circle me-1"></i>Tekst załadowany');
+
+      } catch (error) {
+        console.error('Error loading embedded text preview:', error);
+        this.showError('Nie udało się załadować tekstu: ' + error.message);
       }
+    } else {
+      // Dla non-embedded view pobierz jako tekst i wyświetl
+      try {
+        const response = await fetch(previewUrl);
 
-      const text = await response.text();
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
 
-      const preElement = document.createElement('pre');
-      preElement.style.cssText = `
-        white-space: pre-wrap;
-        font-family: 'Courier New', monospace;
-        font-size: 0.9rem;
-        line-height: 1.5;
-        padding: 1rem;
-        background-color: white;
-        border-radius: 0.375rem;
-        max-width: 100%;
-        overflow-x: auto;
-        margin: 1rem;
-        max-height: calc(${this.config.height} - 2rem);
-        overflow-y: auto;
-      `;
-      preElement.textContent = text;
+        const text = await response.text();
 
-      this.elements.contentContainer.innerHTML = '';
-      this.elements.contentContainer.appendChild(preElement);
-      this.elements.previewElement = preElement;
+        const preElement = document.createElement('pre');
+        preElement.style.cssText = `
+          white-space: pre-wrap;
+          font-family: 'Courier New', monospace;
+          font-size: 0.9rem;
+          line-height: 1.5;
+          padding: 1rem;
+          background-color: white;
+          border-radius: 0.375rem;
+          max-width: 100%;
+          overflow-x: auto;
+          margin: 1rem;
+          max-height: calc(${this.config.height} - 2rem);
+          overflow-y: auto;
+        `;
+        preElement.textContent = text;
 
-      this.updateStatus(`<i class="bi bi-check-circle me-1"></i>${text.length} znaków`);
+        this.elements.contentContainer.innerHTML = '';
+        this.elements.contentContainer.appendChild(preElement);
+        this.elements.previewElement = preElement;
 
-    } catch (error) {
-      console.error('Error loading text preview:', error);
-      this.showError('Nie udało się załadować tekstu: ' + error.message);
+        this.updateStatus(`<i class="bi bi-check-circle me-1"></i>${text.length} znaków`);
+
+      } catch (error) {
+        console.error('Error loading text preview:', error);
+        this.showError('Nie udało się załadować tekstu: ' + error.message);
+      }
     }
   }
 
@@ -450,6 +529,7 @@ window.createImagePreview = (containerId, imageUrl, options = {}) => {
   return new DocumentPreview(containerId, {
     docType: 'image',
     previewUrl: imageUrl,
+    embedded: false,
     ...options
   });
 };
@@ -458,6 +538,7 @@ window.createPdfPreview = (containerId, pdfUrl, options = {}) => {
   return new DocumentPreview(containerId, {
     docType: 'pdf',
     previewUrl: pdfUrl,
+    embedded: false,
     ...options
   });
 };
