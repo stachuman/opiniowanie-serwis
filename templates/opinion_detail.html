@@ -278,10 +278,10 @@
 
                   <!-- OCR (jeśli nie wykonany) -->
                   {% if doc.ocr_status == 'none' %}
-                    <a href="{{ url_for('document_run_ocr', doc_id=doc.id) }}"
-                       class="btn btn-outline-success btn-sm" title="Uruchom OCR">
+                    <button type="button" class="btn btn-outline-success btn-sm run-ocr-btn"
+                            data-doc-id="{{ doc.id }}" title="Uruchom OCR">
                       <i class="bi bi-play"></i>
-                    </a>
+                    </button>
                   {% endif %}
                 </div>
               </td>

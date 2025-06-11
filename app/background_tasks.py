@@ -1,10 +1,27 @@
 # POPRAWKA background_tasks.py - OCR w osobnym procesie
+# FIX dla CUDA multiprocessing
+
+import os
+import sys
+
+# KRITYCZNE: Ustaw spawn method i CUDA settings PRZED wszystkimi importami
+try:
+    import multiprocessing as mp
+
+    if mp.get_start_method(allow_none=True) != 'spawn':
+        mp.set_start_method('spawn', force=True)
+        print("🔧 [BACKGROUND] Ustawiono spawn method dla multiprocessing")
+except RuntimeError as e:
+    print(f"🔧 [BACKGROUND] Multiprocessing method już ustawiony: {e}")
+
+# CUDA environment settings
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['TORCH_USE_CUDA_DSA'] = '1'
 
 import asyncio
 import logging
 from typing import Dict, List, Set
 from concurrent.futures import ProcessPoolExecutor
-import multiprocessing as mp
 
 # Konfiguracja logowania
 logging.basicConfig(level=logging.INFO)
@@ -29,10 +46,19 @@ def get_ocr_executor():
     """Lazy initialization of ProcessPoolExecutor."""
     global ocr_executor
     if ocr_executor is None:
+        # Sprawdź aktualną metodę multiprocessing
+        current_method = mp.get_start_method()
+        logger.info(f"🔧 [BACKGROUND] Multiprocessing method: {current_method}")
+
+        if current_method != 'spawn':
+            logger.warning(
+                f"⚠️ [BACKGROUND] UWAGA: Używam '{current_method}' zamiast 'spawn' - może powodować problemy z CUDA")
+
         # Użyj max 2 procesy dla OCR żeby nie przeciążyć serwera
         max_workers = min(2, mp.cpu_count())
         ocr_executor = ProcessPoolExecutor(max_workers=max_workers)
-        logger.info(f"Utworzono ProcessPoolExecutor dla OCR z {max_workers} procesami")
+        logger.info(
+            f"✅ [BACKGROUND] Utworzono ProcessPoolExecutor dla OCR z {max_workers} procesami (method: {current_method})")
     return ocr_executor
 
 
@@ -70,6 +96,10 @@ def run_ocr_in_process(doc_id: int) -> dict:
     try:
         logger.info(f"🔄 [PROCES] Rozpoczynam OCR dla dokumentu {doc_id}")
 
+        # Sprawdź środowisko w procesie worker
+        current_method = mp.get_start_method()
+        logger.info(f"🔧 [PROCES] Worker multiprocessing method: {current_method}")
+
         # ✅ UŻYJ NOWEJ SYNC FUNKCJI z pipeline.py
         from tasks.ocr.pipeline import process_document_sync
 
@@ -86,6 +116,11 @@ def run_ocr_in_process(doc_id: int) -> dict:
     except Exception as e:
         error_msg = str(e)
         logger.error(f"❌ [PROCES] Globalny błąd OCR dla dokumentu {doc_id}: {error_msg}")
+
+        # Dodaj stack trace dla debugowania
+        import traceback
+        traceback.print_exc()
+
         return {"success": False, "error": error_msg, "doc_id": doc_id}
 
 
@@ -149,6 +184,17 @@ async def _handle_ocr_result(ocr_future, doc_id: int):
 # ✅ POPRAWIONA: Funkcja startująca workery
 async def start_background_workers():
     """Uruchamia wszystkie workery zadań w tle."""
+    # Sprawdź konfigurację przed uruchomieniem
+    logger.info(f"🔧 [BACKGROUND] Sprawdzam konfigurację multiprocessing...")
+    current_method = mp.get_start_method()
+    logger.info(f"🔧 [BACKGROUND] Aktualny multiprocessing method: {current_method}")
+
+    if current_method == 'spawn':
+        logger.info("✅ [BACKGROUND] Multiprocessing poprawnie skonfigurowany dla CUDA")
+    else:
+        logger.warning(
+            f"⚠️ [BACKGROUND] UWAGA: Multiprocessing używa '{current_method}' - może powodować problemy z CUDA")
+
     # Uruchom worker OCR
     asyncio.create_task(ocr_worker())
     logger.info("🚀 Uruchomiono workery zadań w tle z ProcessPoolExecutor")
@@ -159,5 +205,8 @@ async def cleanup_background_workers():
     """Zamyka executor przy wyłączaniu aplikacji."""
     global ocr_executor
     if ocr_executor:
+        logger.info("🛑 Zamykam ProcessPoolExecutor...")
         ocr_executor.shutdown(wait=True)
         logger.info("🛑 Zamknięto ProcessPoolExecutor")
+    else:
+        logger.info("🛑 ProcessPoolExecutor już zamknięty")

@@ -175,12 +175,20 @@ class DocumentManager:
 
             # Sprawdź, czy istnieje wynik OCR (dokument TXT)
             ocr_txt = None
+
             if doc.ocr_status == "done":
                 ocr_txt_query = select(Document).where(
                     Document.ocr_parent_id == doc_id,
                     Document.doc_type == "OCR TXT"
-                )
-                ocr_txt = session.exec(ocr_txt_query).first()
+                ).order_by(Document.upload_time.desc())  # ✅ SORTUJ PO DACIE, NAJNOWSZY PIERWSZY
+                ocr_txt = session.exec(ocr_txt_query).first()  # Teraz .first() bierze najnowszy
+
+            # if doc.ocr_status == "done":
+            #    ocr_txt_query = select(Document).where(
+            #        Document.ocr_parent_id == doc_id,
+            #        Document.doc_type == "OCR TXT"
+            #    )
+            #    ocr_txt = session.exec(ocr_txt_query).first()
 
             # Przygotuj podglądy tekstów
             doc_text_preview = None

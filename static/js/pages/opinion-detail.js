@@ -54,8 +54,58 @@ class OpinionDetailManager {
       this.handleQuickSummary(e, summaryBtn);
       return;
     }
+
+    // NOWE: Uruchamianie OCR
+    const runOcrBtn = e.target.closest('.run-ocr-btn');
+    if (runOcrBtn) {
+      this.handleRunOcr(e, runOcrBtn);
+      return;
+    }
   }
 
+  /**
+   * Obsługa uruchamiania OCR
+   */
+  async handleRunOcr(e, button) {
+    e.preventDefault();
+
+    const docId = button.getAttribute('data-doc-id');
+
+    try {
+      // Wyłącz przycisk i pokaż loading
+      button.disabled = true;
+      const originalHtml = button.innerHTML;
+      button.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+
+      // Wywołaj API - POST request
+      const response = await fetch(`/document/${docId}/run_ocr`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      // Pokaż komunikat sukcesu
+      window.alertManager.success('Proces OCR został uruchomiony', {
+        duration: 5000
+      });
+
+      // Odśwież stronę po krótkim opóźnieniu
+      setTimeout(() => location.reload(), 2000);
+
+    } catch (error) {
+      console.error('Błąd uruchamiania OCR:', error);
+      window.alertManager.error('Nie udało się uruchomić OCR: ' + error.message);
+
+      // Przywróć przycisk
+      button.disabled = false;
+      button.innerHTML = '<i class="bi bi-play"></i>';
+    }
+  }
   /**
    * Obsługa edycji notatek
    */

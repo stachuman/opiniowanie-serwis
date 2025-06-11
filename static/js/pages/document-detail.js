@@ -58,7 +58,7 @@ class DocumentDetailManager {
     }
   }
 
-  /**
+/**
    * Obsługa uruchamiania OCR
    */
   async handleRunOcr(e, button) {
@@ -72,13 +72,24 @@ class DocumentDetailManager {
       const originalHtml = button.innerHTML;
       button.innerHTML = '<i class="bi bi-hourglass-split"></i> Uruchamianie...';
 
-      // Wywołaj API
-      await window.apiClient.runOcr(docId);
+      // POPRAWKA: Bezpośredni fetch request zamiast przez apiClient
+      const response = await fetch(`/document/${docId}/run_ocr`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
       // Pokaż komunikat sukcesu
-      window.alertManager.success('Proces OCR został uruchomiony', {
-        duration: 5000
-      });
+      if (window.alertManager) {
+        window.alertManager.success('Proces OCR został uruchomiony', {
+          duration: 5000
+        });
+      }
 
       // Rozpocznij monitorowanie
       this.startOcrProgressMonitoring();
@@ -88,14 +99,19 @@ class DocumentDetailManager {
 
     } catch (error) {
       console.error('Błąd uruchamiania OCR:', error);
-      window.alertManager.error('Nie udało się uruchomić OCR: ' + error.message);
+
+      if (window.alertManager) {
+        window.alertManager.error('Nie udało się uruchomić OCR: ' + error.message);
+      } else {
+        alert('Błąd uruchamiania OCR: ' + error.message);
+      }
 
       // Przywróć przycisk
       button.disabled = false;
       button.innerHTML = originalHtml;
     }
   }
-
+  
   /**
    * Obsługa odświeżania tekstu OCR
    */

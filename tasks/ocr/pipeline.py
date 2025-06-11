@@ -1,11 +1,30 @@
 """
 Główny pipeline przetwarzania OCR.
 CZYSTA WERSJA - tylko SQLite, bez SQLModel Session.
+POPRAWKA: Fix dla CUDA multiprocessing
 """
-import sqlite3
+
+# KRITYCZNE: Ustaw spawn method PRZED wszystkimi innymi importami
+import sys
+import os
+
+# Force spawn method dla multiprocessing - musi być PRZED torch
+try:
+    import multiprocessing as mp
+    if mp.get_start_method(allow_none=True) != 'spawn':
+        mp.set_start_method('spawn', force=True)
+        print("🔧 [PROCES] Ustawiono spawn method dla multiprocessing")
+except RuntimeError as e:
+    # Jeśli spawn już ustawiony
+    print(f"🔧 [PROCES] Multiprocessing method już ustawiony: {e}")
+
+# Disable CUDA before any torch imports
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['TORCH_USE_CUDA_DSA'] = '1'
+
 import uuid
 import tempfile
-import os
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +35,20 @@ from .models import process_image_to_text
 from .postprocessors import clean_ocr_text, estimate_ocr_confidence
 
 
+def ensure_cuda_cleanup():
+    """Wymuś czyszczenie CUDA przed rozpoczęciem procesu."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            # Force garbage collection
+            import gc
+            gc.collect()
+            print("🧹 [PROCES] CUDA cache wyczyszczony")
+    except Exception as e:
+        print(f"⚠️ [PROCES] Błąd czyszczenia CUDA: {e}")
+
+
 def process_document_sync(doc_id: int) -> dict:
     """
     Główna funkcja OCR dla ProcessPoolExecutor.
@@ -23,6 +56,9 @@ def process_document_sync(doc_id: int) -> dict:
     """
     try:
         print(f"🔄 [PROCES] Rozpoczynam OCR dla dokumentu {doc_id}")
+
+        # Wyczyść CUDA na początku procesu
+        ensure_cuda_cleanup()
 
         # Uruchom główne przetwarzanie
         result_id = process_document_sqlite(doc_id)
@@ -106,8 +142,25 @@ def process_single_image(doc_id: int, file_path: Path, filename: str):
 
     update_document_status(doc_id, "running", "Przygotowanie obrazu do OCR", 0.3)
 
-    # OCR obrazu
-    page_text = process_image_to_text(str(file_path))
+    # Wyczyść CUDA przed OCR
+    ensure_cuda_cleanup()
+
+    # Debug: Sprawdź czy plik istnieje
+    print(f"🔍 [PROCES] Sprawdzam plik: {file_path}")
+    print(f"🔍 [PROCES] Plik istnieje: {file_path.exists()}")
+    print(f"🔍 [PROCES] Rozmiar pliku: {file_path.stat().st_size if file_path.exists() else 'N/A'}")
+
+    try:
+        # OCR obrazu
+        print(f"🔍 [PROCES] Wywołuję process_image_to_text...")
+        page_text = process_image_to_text(str(file_path))
+        print(f"🔍 [PROCES] OCR zwrócił: {len(page_text)} znaków")
+        print(f"🔍 [PROCES] Pierwsze 100 znaków: {page_text[:100]}")
+    except Exception as e:
+        print(f"❌ [PROCES] Błąd w process_image_to_text: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
 
     update_document_status(doc_id, "running", "Czyszczenie tekstu", 0.8)
 
@@ -158,6 +211,9 @@ def process_pdf_document(doc_id: int, file_path: Path, filename: str):
             # Zapisz i przetwórz stronę
             img.save(img_path, "PNG")
 
+            # Wyczyść CUDA przed każdą stroną
+            ensure_cuda_cleanup()
+
             # OCR strony
             page_text = process_image_to_text(img_path)
             clean_text = clean_ocr_text(page_text)
@@ -177,6 +233,9 @@ def process_pdf_document(doc_id: int, file_path: Path, filename: str):
             # Usuń plik tymczasowy
             if os.path.exists(img_path):
                 os.remove(img_path)
+
+            # Wyczyść pamięć po każdej stronie
+            ensure_cuda_cleanup()
 
     # Połącz teksty stron
     text_all = ""
@@ -209,7 +268,36 @@ def save_ocr_results(doc_id: int, text_content: str, confidence: float,
     with sqlite3.connect(str(db_path)) as conn:
         cursor = conn.cursor()
 
-        # Utwórz wpis dla dokumentu TXT
+        # ✅ NOWE: Usuń stare dokumenty OCR dla tego dokumentu
+        print(f"🧹 [PROCES] Usuwam stare dokumenty OCR dla doc_id={doc_id}")
+
+        # Pobierz stare dokumenty OCR
+        cursor.execute("""
+            SELECT id, stored_filename FROM document 
+            WHERE ocr_parent_id = ? AND doc_type = 'OCR TXT'
+        """, (doc_id,))
+        old_ocr_docs = cursor.fetchall()
+
+        # Usuń stare pliki i rekordy
+        for old_id, old_filename in old_ocr_docs:
+            try:
+                old_file_path = FILES_DIR / old_filename
+                if old_file_path.exists():
+                    old_file_path.unlink()
+                    print(f"🗑️ [PROCES] Usunięto stary plik OCR: {old_filename}")
+            except Exception as e:
+                print(f"⚠️ [PROCES] Błąd usuwania starego pliku {old_filename}: {e}")
+
+        # Usuń stare rekordy z bazy
+        cursor.execute("""
+            DELETE FROM document 
+            WHERE ocr_parent_id = ? AND doc_type = 'OCR TXT'
+        """, (doc_id,))
+
+        if old_ocr_docs:
+            print(f"🗑️ [PROCES] Usunięto {len(old_ocr_docs)} starych dokumentów OCR")
+
+        # Utwórz wpis dla nowego dokumentu TXT
         txt_original_name = f"{Path(original_filename).stem}.txt"
         now_iso = datetime.utcnow().isoformat()
 
@@ -229,7 +317,14 @@ def save_ocr_results(doc_id: int, text_content: str, confidence: float,
         txt_doc_id = cursor.lastrowid
         conn.commit()
 
-        print(f"✅ [PROCES] Utworzono dokument TXT ID: {txt_doc_id}")
+        print(f"✅ [PROCES] Utworzono nowy dokument TXT ID: {txt_doc_id}")
+
+        # ✅ NOWE: Wyczyść cache tekstów dla tego dokumentu
+        try:
+            from app.text_extraction import clear_text_cache
+            clear_text_cache(doc_id)
+        except Exception as e:
+            print(f"⚠️ [PROCES] Błąd czyszczenia cache: {e}")
 
         return txt_doc_id
 
@@ -340,8 +435,6 @@ def update_progress_sqlite(doc_id: int, progress: float, info: str,
     update_document_status(doc_id, "running", info, progress,
                           current_page=current_page, total_pages=total_pages)
 
-
-# DODAJ NA KONIEC pipeline.py - COMPATIBILITY WRAPPERS:
 
 def run_ocr_pipeline(doc_id: int):
     """

@@ -189,10 +189,11 @@ async def document_ocr_selection(request: Request, doc_id: int):
 
                 # Jeśli to zaznaczenie całej strony, sprawdź czy mamy już OCR
                 if is_full_page:
+
                     ocr_txt_query = select(Document).where(
                         Document.ocr_parent_id == doc_id,
                         Document.doc_type == "OCR TXT"
-                    )
+                    ).order_by(Document.upload_time.desc())  # ✅ NAJNOWSZY PIERWSZY
                     ocr_txt = session.exec(ocr_txt_query).first()
 
                     if ocr_txt:
@@ -236,9 +237,9 @@ async def document_ocr_selection(request: Request, doc_id: int):
                     ocr_txt_query = select(Document).where(
                         Document.ocr_parent_id == doc_id,
                         Document.doc_type == "OCR TXT"
-                    )
+                    ).order_by(Document.upload_time.desc())  # ✅ NAJNOWSZY PIERWSZY
                     ocr_txt = session.exec(ocr_txt_query).first()
-
+                
                     if ocr_txt:
                         # Mamy już OCR, zwróć go
                         from app.text_extraction import get_ocr_text_for_document

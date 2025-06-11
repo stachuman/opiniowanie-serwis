@@ -49,6 +49,22 @@ class TextEditor {
   }
 
   /**
+   * Tworzy tylko textarea (helper method)
+  */
+  createTextarea() {
+    const textarea = document.createElement('textarea');
+    textarea.className = 'form-control';
+    textarea.rows = 15;
+    textarea.style.cssText = `
+      font-family: 'Courier New', monospace;
+      resize: vertical;
+      min-height: 300px;
+  ` ;
+    textarea.placeholder = this.config.placeholder;
+    return textarea;
+  }
+
+  /**
    * Konfiguracja struktury DOM
    */
 setupDOM() {
@@ -56,8 +72,20 @@ setupDOM() {
   this.elements = {
     displayArea: this.container.querySelector('.text-display') || this.createDisplayArea(),
     editArea: this.container.querySelector('.text-editor') || this.createEditArea(),
-    textarea: null, // Będzie ustawiony w createEditArea
+    textarea: null, // Będzie ustawiony poniżej
   };
+
+  // WAŻNE: Sprawdź czy textarea istnieje w znalezionym editArea
+  if (this.elements.editArea) {
+    this.elements.textarea = this.elements.editArea.querySelector('textarea');
+  }
+
+  // Jeśli nadal nie ma textarea, stwórz go
+  if (!this.elements.textarea) {
+    console.warn('Textarea not found in existing editArea, creating new one');
+    this.elements.textarea = this.createTextarea();
+    this.elements.editArea.appendChild(this.elements.textarea);
+  }
 
   // POTEM utwórz przyciski
   this.elements.toggleBtn = this.container.querySelector('.toggle-edit-btn') || this.createToggleButton();
@@ -71,7 +99,6 @@ setupDOM() {
   this.elements.editArea.style.display = 'none';
   this.updatePlaceholder();
 }
-
   /**
    * Tworzy obszar wyświetlania tekstu
    */
@@ -97,24 +124,83 @@ setupDOM() {
   createEditArea() {
     const editContainer = document.createElement('div');
     editContainer.className = 'text-editor';
-    
-    const textarea = document.createElement('textarea');
-    textarea.className = 'form-control';
-    textarea.rows = 15;
-    textarea.style.cssText = `
-      font-family: 'Courier New', monospace;
-      resize: vertical;
-      min-height: 300px;
-    `;
-    textarea.placeholder = this.config.placeholder;
-    
+
+    const textarea = this.createTextarea();
     editContainer.appendChild(textarea);
     this.container.appendChild(editContainer);
-    
+
+    // Ustaw referencję do textarea
     this.elements.textarea = textarea;
     return editContainer;
   }
 
+  enterEditMode() {
+    if (this.config.readOnly) return;
+
+    // ZABEZPIECZENIE: Sprawdź czy textarea istnieje
+    if (!this.elements.textarea) {
+      console.error('Textarea not found! Cannot enter edit mode.');
+      return;
+    }
+
+    const currentText = this.getCurrentText();
+    this.state.originalTextBeforeEdit = currentText;
+
+    // Ustaw tekst w textarea
+    this.elements.textarea.value = currentText;
+
+    // Przełącz widoczność
+    this.elements.displayArea.style.display = 'none';
+    this.elements.editArea.style.display = 'block';
+
+    // Aktualizuj przycisk
+    this.elements.toggleBtn.innerHTML = '<i class="bi bi-eye"></i> Podgląd';
+    this.elements.toggleBtn.classList.remove('btn-outline-info');
+    this.elements.toggleBtn.classList.add('btn-outline-warning');
+
+    this.state.isEditMode = true;
+
+    // Focus na textarea
+    this.elements.textarea.focus();
+
+    // Trigger event
+    this.trigger('editModeEntered');
+  }
+
+  /**
+   * Bindowanie event handlerów - Z ZABEZPIECZENIAMI
+   */
+  bindEvents() {
+    // Toggle edit mode
+    this.elements.toggleBtn.addEventListener('click', () => this.toggleEditMode());
+
+    // Save changes
+    this.elements.saveBtn.addEventListener('click', () => this.saveChanges());
+
+    // Copy text
+    this.elements.copyBtn.addEventListener('click', () => this.copyToClipboard());
+
+    // Text changes monitoring - TYLKO JEŚLI TEXTAREA ISTNIEJE
+    if (this.elements.textarea) {
+      this.elements.textarea.addEventListener('input', () => this.onTextChange());
+      this.elements.textarea.addEventListener('paste', () => {
+        setTimeout(() => this.onTextChange(), 10);
+      });
+    } else {
+      console.warn('Textarea not found - text change monitoring disabled');
+    }
+
+    // Display area click to enter edit mode
+    this.elements.displayArea.addEventListener('click', () => {
+      if (!this.state.isEditMode && !this.config.readOnly) {
+        this.enterEditMode();
+      }
+    });
+
+    // Monitor display area changes (external updates)
+    this.setupDisplayMonitoring();
+  }
+  
   /**
    * Tworzy przycisk przełączania trybu
    */
@@ -482,12 +568,13 @@ setupDOM() {
    * Pobiera aktualny tekst
    */
   getCurrentText() {
-    if (this.state.isEditMode) {
+    if (this.state.isEditMode && this.elements.textarea) {
       return this.elements.textarea.value;
     } else {
       return this.elements.displayArea.textContent || '';
     }
   }
+
 
   /**
    * Aktualizuje wyświetlany tekst
@@ -559,9 +646,20 @@ setupDOM() {
    * Ustawia tekst
    */
   setText(text) {
+    console.log('TextEditor.setText called with:', text ? text.length + ' chars' : 'empty');
+    console.log('Elements state:', {
+      displayArea: !!this.elements.displayArea,
+      editArea: !!this.elements.editArea,
+      textarea: !!this.elements.textarea,
+      isEditMode: this.state.isEditMode
+    });
+
     this.updateDisplayText(text);
-    if (this.state.isEditMode) {
+
+    if (this.state.isEditMode && this.elements.textarea) {
       this.elements.textarea.value = text;
+    } else if (this.state.isEditMode && !this.elements.textarea) {
+      console.warn('In edit mode but textarea not found!');
     }
   }
 
