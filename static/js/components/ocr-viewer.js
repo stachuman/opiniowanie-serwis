@@ -35,18 +35,16 @@ class OcrViewer {
             pageNumPending: null,
             ocrText: {}, // Cache tekstu OCR dla stron
             currentFullPageOcr: null,
-            currentViewport: null // Dla PDF
+            currentViewport: null, // Dla PDF
+            rotation: 0 // Kąt obrotu obrazu (0, 90, 180, 270)
         };
 
         // Elementy DOM
         this.elements = {};
 
-        // Edytor tekstu
-        this.textEditor = {
-            isEditMode: false,
-            originalTextBeforeEdit: '',
-            originalText: '',
-            textChanged: false
+        // Stan tekstu
+        this.textState = {
+            originalText: ''
         };
 
         this.init();
@@ -65,7 +63,6 @@ class OcrViewer {
             await this.initImageViewer();
         }
 
-        this.setupTextEditor();
     }
 
     /**
@@ -79,16 +76,17 @@ class OcrViewer {
             selectionOverlay: this.container.querySelector('#selectionOverlay'),
             ocrLoader: this.container.querySelector('#ocrLoader'),
             textDisplay: this.container.querySelector('#textDisplay'),
-            textEditor: this.container.querySelector('#textEditor'),
-            textEditArea: this.container.querySelector('#textEditArea'),
-            toggleEditBtn: this.container.querySelector('#toggleEditMode'),
-            saveChangesBtn: this.container.querySelector('#saveChangesBtn'),
             copyFullBtn: this.container.querySelector('#copyFullBtn'),
 
             // PDF specific
             prevPageBtn: this.container.querySelector('#prevPage'),
             nextPageBtn: this.container.querySelector('#nextPage'),
-            pageInfo: this.container.querySelector('#pageInfo')
+            pageInfo: this.container.querySelector('#pageInfo'),
+            
+            // Rotation controls
+            rotateLeftBtn: document.querySelector('#rotateLeft'),
+            rotateRightBtn: document.querySelector('#rotateRight'),
+            resetRotationBtn: document.querySelector('#resetRotation')
         };
 
         // Sprawdź czy wszystkie wymagane elementy istnieją
@@ -119,9 +117,18 @@ class OcrViewer {
             this.elements.nextPageBtn.addEventListener('click', this.nextPage.bind(this));
         }
 
-        // Edytor tekstu
-        if (this.elements.toggleEditBtn) {
-            this.elements.toggleEditBtn.addEventListener('click', this.toggleEditMode.bind(this));
+        // Kopiowanie tekstu - obsługiwane przez clipboard.js globalnie przez data-copy-target
+        // Przycisk ma atrybut data-copy-target="#textDisplay"
+
+        // Rotation controls
+        if (this.elements.rotateLeftBtn) {
+            this.elements.rotateLeftBtn.addEventListener('click', () => this.rotateImage(-90));
+        }
+        if (this.elements.rotateRightBtn) {
+            this.elements.rotateRightBtn.addEventListener('click', () => this.rotateImage(90));
+        }
+        if (this.elements.resetRotationBtn) {
+            this.elements.resetRotationBtn.addEventListener('click', () => this.resetRotation());
         }
 
         // Skróty klawiszowe
@@ -193,73 +200,84 @@ class OcrViewer {
      * Renderowanie strony PDF
      */
     async renderPage(num) {
-        if (!this.pdfDoc) return;
+  if (!this.pdfDoc) return;
 
-        this.state.pageRendering = true;
+  this.state.pageRendering = true;
 
-        try {
-            const page = await this.pdfDoc.getPage(num);
-            const viewport = page.getViewport({scale: this.state.scale});
-            this.state.currentViewport = viewport;
+  try {
+    const page = await this.pdfDoc.getPage(num);
+    const viewport = page.getViewport({scale: this.state.scale});
+    this.state.currentViewport = viewport;
 
-            // Ustaw wymiary canvas
-            const canvas = this.elements.canvas;
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
+    // Ustaw wymiary canvas
+    const canvas = this.elements.canvas;
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
 
-            // Renderuj
-            const ctx = canvas.getContext('2d');
-            const renderContext = {
-                canvasContext: ctx,
-                viewport: viewport
-            };
+    // Renderuj
+    const ctx = canvas.getContext('2d');
+    const renderContext = {
+      canvasContext: ctx,
+      viewport: viewport
+    };
 
-            await page.render(renderContext).promise;
+    await page.render(renderContext).promise;
 
-            this.state.pageRendering = false;
-            this.state.currentPage = num;
+    this.state.pageRendering = false;
+    this.state.currentPage = num;
 
-            if (this.state.pageNumPending !== null) {
-                this.renderPage(this.state.pageNumPending);
-                this.state.pageNumPending = null;
-            }
-
-            this.updatePageInfo();
-            await this.loadPageOcr(num);
-
-        } catch (error) {
-            console.error('Error rendering page:', error);
-            this.state.pageRendering = false;
-        }
+    if (this.state.pageNumPending !== null) {
+      this.renderPage(this.state.pageNumPending);
+      this.state.pageNumPending = null;
     }
+
+    this.updatePageInfo();
+    await this.loadPageOcr(num);
+
+    // NOWE: Synchronizuj przewijanie tekstu z aktualną stroną
+    this.syncTextScrollWithPage(num);
+
+  } catch (error) {
+    console.error('Error rendering page:', error);
+    this.state.pageRendering = false;
+  }
+}
+
+syncTextScrollWithPage(pageNumber) {
+  // Sprawdź czy PdfViewerManager istnieje i ma funkcję synchronizacji
+  if (window.pdfViewerManager && typeof window.pdfViewerManager.scrollToPageInText === 'function') {
+    // Krótkie opóźnienie żeby tekst zdążył się załadować
+    setTimeout(() => {
+      window.pdfViewerManager.scrollToPageInText(pageNumber);
+    }, 300);
+  }
+}
 
     /**
      * Nawigacja - poprzednia strona
      */
     prevPage() {
-        if (this.state.currentPage <= 1) return;
+  if (this.state.currentPage <= 1) return;
 
-        if (this.state.pageRendering) {
-            this.state.pageNumPending = this.state.currentPage - 1;
-        } else {
-            this.renderPage(this.state.currentPage - 1);
-        }
-        this.hideSelection();
-    }
+  if (this.state.pageRendering) {
+    this.state.pageNumPending = this.state.currentPage - 1;
+  } else {
+    this.renderPage(this.state.currentPage - 1);
+  }
+  this.hideSelection();
+}
 
-    /**
-     * Nawigacja - następna strona
-     */
-    nextPage() {
-        if (this.state.currentPage >= this.state.totalPages) return;
+nextPage() {
+  if (this.state.currentPage >= this.state.totalPages) return;
 
-        if (this.state.pageRendering) {
-            this.state.pageNumPending = this.state.currentPage + 1;
-        } else {
-            this.renderPage(this.state.currentPage + 1);
-        }
-        this.hideSelection();
-    }
+  if (this.state.pageRendering) {
+    this.state.pageNumPending = this.state.currentPage + 1;
+  } else {
+    this.renderPage(this.state.currentPage + 1);
+  }
+  this.hideSelection();
+}
+
 
     /**
      * Aktualizacja informacji o stronie
@@ -339,9 +357,14 @@ class OcrViewer {
                 y: canvasY
             };
         } else {
-            // Dla obrazów
-            const imageX = clientX - rect.left;
-            const imageY = clientY - rect.top;
+            // Dla obrazów - zwracamy surowe współrzędne w układzie przeglądarki
+            // Transformacja dla OCR będzie wykonana później w performOcrSelection()
+            let imageX = clientX - rect.left;
+            let imageY = clientY - rect.top;
+
+            console.log(`🔍 DEBUG calculateCoordinates - rotation: ${this.state.rotation}°`);
+            console.log(`  Mouse: (${clientX}, ${clientY}), Rect: (${rect.left}, ${rect.top})`);
+            console.log(`  ImageXY w układzie przeglądarki: (${imageX}, ${imageY})`);
 
             return {
                 x: Math.max(0, Math.min(rect.width, imageX)),
@@ -357,11 +380,10 @@ class OcrViewer {
         if (!this.elements.selectionOverlay) return;
 
         const canvas = this.elements.canvas;
-        const rect = canvas.getBoundingClientRect();
-
         let left, top, width, height;
 
         if (this.config.docType === 'pdf') {
+            const rect = canvas.getBoundingClientRect();
             const cssScaleX = rect.width / canvas.width;
             const cssScaleY = rect.height / canvas.height;
 
@@ -370,12 +392,27 @@ class OcrViewer {
             width = Math.abs(this.state.endX - this.state.startX) * cssScaleX;
             height = Math.abs(this.state.endY - this.state.startY) * cssScaleY;
         } else {
-            left = Math.min(this.state.startX, this.state.endX);
-            top = Math.min(this.state.startY, this.state.endY);
+            // Dla obrazów - współrzędne są relative do obrazu, ale overlay jest relative do wrapper
+            // Pobierz pozycje elementów
+            const rect = canvas.getBoundingClientRect();
+            const wrapper = canvas.parentElement; // imageWrapper
+            const wrapperRect = wrapper.getBoundingClientRect();
+            
+            // Offset obrazu względem wrapper (gdy obraz jest wyśrodkowany w wrapper)
+            const offsetX = rect.left - wrapperRect.left;
+            const offsetY = rect.top - wrapperRect.top;
+            
+            // Współrzędne mouse + offset obrazu = pozycja w wrapper
+            left = Math.min(this.state.startX, this.state.endX) + offsetX;
+            top = Math.min(this.state.startY, this.state.endY) + offsetY;
             width = Math.abs(this.state.endX - this.state.startX);
             height = Math.abs(this.state.endY - this.state.startY);
+            
+            console.log(`🔍 Image offset in wrapper: (${offsetX}, ${offsetY})`);
+            console.log(`🔍 Final overlay position: (${left}, ${top}) ${width}x${height}, rotation: ${this.state.rotation}°`);
         }
 
+        // WAŻNE: Pozycjonowanie względem imageWrapper, nie kontenera!
         this.elements.selectionOverlay.style.left = `${left}px`;
         this.elements.selectionOverlay.style.top = `${top}px`;
         this.elements.selectionOverlay.style.width = `${width}px`;
@@ -401,6 +438,7 @@ class OcrViewer {
         try {
             // Oblicz znormalizowane współrzędne (0-1)
             const canvas = this.elements.canvas;
+            const rect = canvas.getBoundingClientRect(); // Zawsze pobierz rect
             let normCoords;
 
             if (this.config.docType === 'pdf') {
@@ -411,21 +449,42 @@ class OcrViewer {
                     y2: Math.max(this.state.startY, this.state.endY) / canvas.height
                 };
             } else {
-                const rect = canvas.getBoundingClientRect();
+                // Debug info dla obrazów
+                console.log('🔍 DEBUG - Image selection coordinates:');
+                console.log('  Canvas getBoundingClientRect:', rect);
+                console.log('  Canvas naturalWidth/Height:', canvas.naturalWidth, 'x', canvas.naturalHeight);
+                console.log('  Mouse coords:', this.state.startX, this.state.startY, '->', this.state.endX, this.state.endY);
+                console.log('  Rotation:', this.state.rotation);
+                
                 normCoords = {
                     x1: Math.min(this.state.startX, this.state.endX) / rect.width,
                     y1: Math.min(this.state.startY, this.state.endY) / rect.height,
                     x2: Math.max(this.state.startX, this.state.endX) / rect.width,
                     y2: Math.max(this.state.startY, this.state.endY) / rect.height
                 };
+                
+                console.log('  Normalized coords:', normCoords);
             }
+
+            // UPROSZCZONE: Wyślij surowe współrzędne + rotację do backend
+            console.log(`🔍 Wysyłanie surowych współrzędnych do backend z rotacją ${this.state.rotation}°`);
+            console.log(`🔍 Normalized coords:`, normCoords);
+            
+            // Backend sam obsłuży transformację współrzędnych
+            let finalCoords = normCoords;
 
             const data = {
                 page: this.state.currentPage,
-                x1: normCoords.x1,
-                y1: normCoords.y1,
-                x2: normCoords.x2,
-                y2: normCoords.y2,
+                x1: finalCoords.x1,
+                y1: finalCoords.y1,
+                x2: finalCoords.x2,
+                y2: finalCoords.y2,
+                rotation: this.state.rotation, // Wyślij informację o obrocie
+                // DODANE: Wyślij informację o rozmiarach obrazu które frontend widzi
+                frontend_image_width: canvas.naturalWidth || rect.width,
+                frontend_image_height: canvas.naturalHeight || rect.height,
+                display_width: rect.width,
+                display_height: rect.height,
                 skip_pdf_embed: true
             };
 
@@ -610,110 +669,12 @@ class OcrViewer {
         }
     }
 
-    // === TEXT EDITOR METHODS ===
-
-    /**
-     * Konfiguracja edytora tekstu
-     */
-    setupTextEditor() {
-        this.setupTextChangeMonitoring();
-    }
-
-    /**
-     * Przełączanie trybu edycji
-     */
-    toggleEditMode() {
-        if (!this.textEditor.isEditMode) {
-            this.enterEditMode();
-        } else {
-            this.exitEditMode(false);
-        }
-    }
-
-    /**
-     * Wejście w tryb edycji
-     */
-    enterEditMode() {
-        const currentText = this.elements.textDisplay.textContent || '';
-        this.textEditor.originalTextBeforeEdit = currentText;
-
-        this.elements.textEditArea.value = currentText;
-        this.elements.textDisplay.classList.add('d-none');
-        this.elements.textEditor.classList.remove('d-none');
-
-        this.elements.toggleEditBtn.innerHTML = '<i class="bi bi-eye"></i> Podgląd';
-        this.elements.toggleEditBtn.classList.remove('btn-outline-info');
-        this.elements.toggleEditBtn.classList.add('btn-outline-warning');
-
-        this.textEditor.isEditMode = true;
-        this.elements.textEditArea.focus();
-    }
-
-    /**
-     * Wyjście z trybu edycji
-     */
-    exitEditMode(autoSave = false) {
-        if (autoSave) {
-            const editedText = this.elements.textEditArea.value;
-            this.updateDisplayText(editedText);
-        }
-
-        this.elements.textDisplay.classList.remove('d-none');
-        this.elements.textEditor.classList.add('d-none');
-
-        this.elements.toggleEditBtn.innerHTML = '<i class="bi bi-pencil"></i> Edytuj';
-        this.elements.toggleEditBtn.classList.remove('btn-outline-warning');
-        this.elements.toggleEditBtn.classList.add('btn-outline-info');
-
-        this.textEditor.isEditMode = false;
-    }
-
-    /**
-     * Monitorowanie zmian tekstu
-     */
-    setupTextChangeMonitoring() {
-        if (!this.elements.textDisplay) return;
-
-        const observer = new MutationObserver(() => {
-            this.checkForTextChanges();
-        });
-
-        observer.observe(this.elements.textDisplay, {
-            childList: true,
-            subtree: true,
-            characterData: true
-        });
-    }
-
-    /**
-     * Sprawdza zmiany w tekście
-     */
-    checkForTextChanges() {
-        const currentText = this.elements.textDisplay.textContent;
-
-        if (currentText !== this.textEditor.originalText) {
-            if (!this.textEditor.textChanged) {
-                this.textEditor.textChanged = true;
-                this.elements.saveChangesBtn.classList.remove('d-none');
-                this.elements.textDisplay.style.backgroundColor = '#fff3cd';
-                this.elements.textDisplay.style.border = '2px solid #ffc107';
-            }
-        } else {
-            if (this.textEditor.textChanged) {
-                this.textEditor.textChanged = false;
-                this.elements.saveChangesBtn.classList.add('d-none');
-                this.elements.textDisplay.style.backgroundColor = '#f8f9fa';
-                this.elements.textDisplay.style.border = '';
-            }
-        }
-    }
-
     /**
      * Aktualizuje wyświetlany tekst
      */
     updateDisplayText(text) {
         this.elements.textDisplay.textContent = text;
-        this.textEditor.originalText = text;
+        this.textState.originalText = text;
     }
 
     // === UI HELPERS ===
@@ -792,22 +753,8 @@ class OcrViewer {
      * Obsługa klawiatury
      */
     handleKeyboard(e) {
-        if (this.textEditor.isEditMode) {
-            if (e.ctrlKey && e.key === 'Enter') {
-                e.preventDefault();
-                this.saveEdit();
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                this.cancelEdit();
-            }
-        } else {
-            if (e.key === 'e' && !e.ctrlKey && !e.altKey &&
-                document.activeElement.tagName !== 'INPUT' &&
-                document.activeElement.tagName !== 'TEXTAREA') {
-                e.preventDefault();
-                this.toggleEditMode();
-            }
-        }
+        // Podstawowe skróty klawiszowe (bez edycji)
+        // W przyszłości można tutaj dodać inne skróty
     }
 
     /**
@@ -817,60 +764,100 @@ class OcrViewer {
         this.hideSelection();
     }
 
-    // === PUBLIC API ===
+    // === ROTATION FUNCTIONS ===
 
     /**
-     * Zapisuje zmiany
+     * Obraca obraz o podany kąt
      */
-    async saveCurrentText() {
-        const currentText = this.elements.textDisplay.textContent;
+    rotateImage(degrees) {
+        this.state.rotation = (this.state.rotation + degrees) % 360;
+        if (this.state.rotation < 0) {
+            this.state.rotation += 360;
+        }
+        
+        console.log(`Obrót obrazu: ${this.state.rotation}°`);
+        this.applyRotation();
+        this.hideSelection(); // Ukryj zaznaczenie po obrocie
+    }
 
-        try {
-            const result = await window.apiClient.updateOcrText(this.config.docId, currentText);
+    /**
+     * Resetuje obrót obrazu
+     */
+    resetRotation() {
+        this.state.rotation = 0;
+        console.log('Reset obrotu obrazu');
+        this.applyRotation();
+        this.hideSelection();
+    }
 
-            if (result.success) {
-                this.textEditor.originalText = currentText;
-                this.textEditor.textChanged = false;
-                this.elements.saveChangesBtn.classList.add('d-none');
-                this.elements.textDisplay.style.backgroundColor = '#f8f9fa';
-                this.elements.textDisplay.style.border = '';
-
-                window.alertManager.showOcrSuccess(
-                    'Zmiany zostały zapisane',
-                    result.ocr_doc_id,
-                    this.config.docId,
-                    this.config.parentId
-                );
-            } else {
-                throw new Error(result.error || 'Nieznany błąd');
+    /**
+     * Aplikuje CSS transform dla obrotu
+     */
+    applyRotation() {
+        if (this.elements.canvas) {
+            this.elements.canvas.style.transform = `rotate(${this.state.rotation}deg)`;
+            this.elements.canvas.style.transition = 'transform 0.3s ease';
+            
+            // KRYTYCZNE: NIE obracaj selection overlay!
+            // Overlay powinien pozostać w układzie współrzędnych przeglądarki
+            // Transformacja współrzędnych odbywa się w calculateCoordinates()
+            if (this.elements.selectionOverlay) {
+                this.elements.selectionOverlay.style.transform = 'none';
+                this.elements.selectionOverlay.style.transformOrigin = 'top left';
             }
-
-        } catch (error) {
-            window.alertManager.error('Błąd podczas zapisywania: ' + error.message);
+            
+            // Aktualizuj wrapper jeśli potrzeba dostosować rozmiary
+            const wrapper = this.elements.canvas.parentElement;
+            if (wrapper && (this.state.rotation === 90 || this.state.rotation === 270)) {
+                // Dla obrotów 90° i 270° może potrzeba dodatkowych dostosowań
+                wrapper.style.display = 'flex';
+                wrapper.style.alignItems = 'center';
+                wrapper.style.justifyContent = 'center';
+            }
         }
     }
 
     /**
-     * Anuluje edycję
+     * Konwertuje współrzędne z uwzględnieniem obrotu (legacy - używana w backend)
      */
-    cancelEdit() {
-        this.elements.textEditArea.value = this.textEditor.originalTextBeforeEdit;
-        this.exitEditMode(false);
+    convertCoordinatesForRotation(x, y, width, height) {
+        let newX = x, newY = y;
+        
+        switch (this.state.rotation) {
+            case 90:
+                newX = y;
+                newY = 1 - x;
+                break;
+            case 180:
+                newX = 1 - x;
+                newY = 1 - y;
+                break;
+            case 270:
+                newX = 1 - y;
+                newY = x;
+                break;
+            default: // 0 degrees
+                break;
+        }
+        
+        return { x: newX, y: newY };
     }
 
     /**
-     * Zapisuje edycję
+     * UPROSZCZONA transformacja współrzędnych - wyślij rotację do backend
      */
-    saveEdit() {
-        const editedText = this.elements.textEditArea.value;
-
-        if (editedText !== this.textEditor.originalTextBeforeEdit) {
-            this.updateDisplayText(editedText);
-            this.checkForTextChanges();
-        }
-
-        this.exitEditMode(true);
+    transformBrowserToImageCoords(x, y) {
+        // UPROSZCZENIE: Nie robimy skomplikowanych transformacji
+        // Wysyłamy surowe współrzędne + informację o rotacji do backend
+        // Backend sam obsłuży rotację przy crop obrazu
+        
+        console.log(`🔍 SIMPLE transform: (${x}, ${y}) with rotation ${this.state.rotation}°`);
+        
+        // Zwracamy surowe współrzędne - backend obsłuży rotację
+        return { x: x, y: y };
     }
+
+    // === PUBLIC API ===
 
     /**
      * Odświeża widok

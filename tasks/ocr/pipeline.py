@@ -22,6 +22,9 @@ except RuntimeError as e:
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 os.environ['TORCH_USE_CUDA_DSA'] = '1'
 
+# KRYTYCZNE: Rozwiązanie fragmentacji pamięci PyTorch CUDA
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
 import uuid
 import tempfile
 import sqlite3
@@ -151,11 +154,64 @@ def process_single_image(doc_id: int, file_path: Path, filename: str):
     print(f"🔍 [PROCES] Rozmiar pliku: {file_path.stat().st_size if file_path.exists() else 'N/A'}")
 
     try:
-        # OCR obrazu
+        # Preprocessing obrazu przed OCR
+        from .preprocessors import preprocess_image
+        print(f"🔍 [PROCES] Preprocessing obrazu...")
+        preprocessed_image_path = preprocess_image(str(file_path))
+        print(f"🔍 [PROCES] Obraz po preprocessingu: {preprocessed_image_path}")
+        
+        # OCR obrazu z fallback na mniejszy rozmiar w przypadku błędu pamięci
         print(f"🔍 [PROCES] Wywołuję process_image_to_text...")
-        page_text = process_image_to_text(str(file_path))
-        print(f"🔍 [PROCES] OCR zwrócił: {len(page_text)} znaków")
-        print(f"🔍 [PROCES] Pierwsze 100 znaków: {page_text[:100]}")
+        page_text = None
+        
+        try:
+            page_text = process_image_to_text(preprocessed_image_path)
+            print(f"🔍 [PROCES] OCR zwrócił: {len(page_text)} znaków")
+            print(f"🔍 [PROCES] Pierwsze 100 znaków: {page_text[:100]}")
+        except Exception as ocr_error:
+            # Sprawdź czy to błąd pamięci CUDA
+            if "CUDA out of memory" in str(ocr_error) or "OutOfMemoryError" in str(ocr_error):
+                print(f"⚠️ [PROCES] Błąd pamięci GPU, próbuję mniejszy rozmiar obrazu...")
+                
+                # Spróbuj z mniejszym rozmiarem (75% oryginalnego)
+                from .preprocessors import preprocess_image
+                from .config import MAX_IMAGE_DIMENSION
+                fallback_max_size = int(MAX_IMAGE_DIMENSION * 0.75)
+                
+                print(f"🔍 [PROCES] Fallback preprocessing z max rozmiarem: {fallback_max_size}px")
+                
+                # Tymczasowo zmień maksymalny rozmiar
+                original_max = MAX_IMAGE_DIMENSION
+                import tasks.ocr.config as config_module
+                config_module.MAX_IMAGE_DIMENSION = fallback_max_size
+                
+                try:
+                    fallback_preprocessed = preprocess_image(str(file_path))
+                    page_text = process_image_to_text(fallback_preprocessed)
+                    print(f"✅ [PROCES] Fallback OCR zakończony pomyślnie: {len(page_text)} znaków")
+                    
+                    # Oczyść fallback file
+                    if fallback_preprocessed != str(file_path):
+                        try:
+                            Path(fallback_preprocessed).unlink()
+                        except:
+                            pass
+                finally:
+                    # Przywróć oryginalny maksymalny rozmiar
+                    config_module.MAX_IMAGE_DIMENSION = original_max
+            
+            # Jeśli nadal błąd lub inny typ błędu, przekaż go dalej
+            if page_text is None:
+                raise ocr_error
+        
+        # Oczyść plik tymczasowy po preprocessingu jeśli został utworzony
+        if preprocessed_image_path != str(file_path):
+            try:
+                Path(preprocessed_image_path).unlink()
+                print(f"🧹 [PROCES] Usunięto tymczasowy plik: {preprocessed_image_path}")
+            except Exception as cleanup_e:
+                print(f"⚠️ [PROCES] Nie udało się usunąć pliku tymczasowego: {cleanup_e}")
+                
     except Exception as e:
         print(f"❌ [PROCES] Błąd w process_image_to_text: {str(e)}")
         import traceback

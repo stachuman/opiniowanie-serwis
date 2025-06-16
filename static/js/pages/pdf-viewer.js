@@ -18,6 +18,7 @@ class PdfViewerManager {
       autoSave: false
     };
 
+
     this.elements = {};
     this.init();
   }
@@ -30,8 +31,81 @@ class PdfViewerManager {
     this.setupEventListeners();
     this.setupKeyboardShortcuts();
     this.setupPdfSpecificFeatures();
-    console.log('PdfViewerManager zainicjalizowany dla dokumentu', this.docId);
   }
+
+  highlightPageMarker(textElement, marker) {
+     const textContent = textElement.textContent;
+    const markerIndex = textContent.indexOf(marker);
+
+    if (markerIndex === -1) return;
+
+  // Stwórz tymczasowe podświetlenie poprzez zmianę koloru tła
+    const originalStyle = textElement.style.backgroundColor;
+
+  // Krótkie miganie
+  setTimeout(() => {
+    textElement.style.backgroundColor = '#ffffcc';
+    setTimeout(() => {
+      textElement.style.backgroundColor = originalStyle;
+    }, 300);
+  }, 100);
+}
+/**
+ * Synchronizuje przewijanie tekstu z aktualną stroną PDF
+ */
+scrollToPageInText(pageNumber) {
+  const textDisplay = document.getElementById('textDisplay');
+  if (!textDisplay) return;
+
+  const pageMarker = `=== Strona ${pageNumber} ===`;
+  const textContent = textDisplay.textContent || textDisplay.innerText;
+
+  // Znajdź pozycję znacznika strony
+  const markerIndex = textContent.indexOf(pageMarker);
+
+  if (markerIndex === -1) {
+    // Jeśli nie znaleziono znacznika, spróbuj alternatywnych formatów
+    const altMarkers = [
+      `===Strona ${pageNumber}===`,
+      `=== Strona${pageNumber} ===`,
+      `== Strona ${pageNumber} ==`
+    ];
+
+    let foundIndex = -1;
+    for (const altMarker of altMarkers) {
+      foundIndex = textContent.indexOf(altMarker);
+      if (foundIndex !== -1) break;
+    }
+
+    if (foundIndex === -1) {
+      return;
+    }
+
+    markerIndex = foundIndex;
+  }
+
+  // Oblicz przybliżoną pozycję scrolla
+  const totalTextLength = textContent.length;
+  const markerPosition = markerIndex / totalTextLength;
+
+  // Przewiń do odpowiedniej pozycji
+  const scrollHeight = textDisplay.scrollHeight;
+  const containerHeight = textDisplay.clientHeight;
+  const maxScrollTop = scrollHeight - containerHeight;
+
+  // Oblicz docelową pozycję (z małym offsetem do góry dla lepszej widoczności)
+  const targetScrollTop = Math.max(0, (markerPosition * scrollHeight) - 50);
+  const finalScrollTop = Math.min(targetScrollTop, maxScrollTop);
+
+  // Płynne przewijanie
+  textDisplay.scrollTo({
+    top: finalScrollTop,
+    behavior: 'smooth'
+  });
+
+  // Opcjonalne: Podświetl znacznik na krótko
+  this.highlightPageMarker(textDisplay, pageMarker);
+}
 
   /**
    * Znajdź kluczowe elementy
@@ -168,9 +242,6 @@ class PdfViewerManager {
 
     // Setup page jump functionality
     this.setupPageJump();
-
-    // Setup search in PDF functionality
-    this.setupPdfSearch();
   }
 
   /**
@@ -217,42 +288,6 @@ class PdfViewerManager {
     pageInfo.title = 'Kliknij aby przejść do konkretnej strony';
   }
 
-  /**
-   * Konfiguruje wyszukiwanie w PDF
-   */
-  setupPdfSearch() {
-    // Dodaj pole wyszukiwania do interfejsu
-    const textEditorContainer = document.getElementById('textEditorContainer');
-    if (!textEditorContainer) return;
-
-    // Sprawdź czy już istnieje
-    if (document.getElementById('pdfSearchBox')) return;
-
-    const searchBox = document.createElement('div');
-    searchBox.id = 'pdfSearchBox';
-    searchBox.className = 'card mb-3';
-    searchBox.innerHTML = `
-      <div class="card-header py-2">
-        <div class="d-flex align-items-center">
-          <i class="bi bi-search me-2"></i>
-          <input type="text" class="form-control form-control-sm"
-                 id="pdfSearchInput" placeholder="Wyszukaj w dokumencie PDF...">
-          <button type="button" class="btn btn-sm btn-outline-secondary ms-2" onclick="pdfViewerManager.searchInPdf()">
-            Szukaj
-          </button>
-        </div>
-      </div>
-    `;
-
-    textEditorContainer.insertBefore(searchBox, textEditorContainer.firstChild);
-
-    // Dodaj event listener dla Enter
-    document.getElementById('pdfSearchInput').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        this.searchInPdf();
-      }
-    });
-  }
 
   // === ZOOM FUNCTIONS ===
 
@@ -298,17 +333,20 @@ class PdfViewerManager {
    * Aktualizuje skalę PDF
    */
   updatePdfScale() {
-    if (window.ocrViewer) {
-      window.ocrViewer.state.scale = this.state.currentScale;
-      window.ocrViewer.renderPage(window.ocrViewer.state.currentPage);
-    }
-
-    // Aktualizuj wskaźnik zoom
-    const zoomLevel = document.getElementById('zoomLevel');
-    if (zoomLevel) {
-      zoomLevel.textContent = Math.round(this.state.currentScale * 100) + '%';
-    }
+  if (window.ocrViewer) {
+    window.ocrViewer.state.scale = this.state.currentScale;
+    window.ocrViewer.renderPage(window.ocrViewer.state.currentPage);
   }
+
+  // Aktualizuj wskaźnik zoom
+  const zoomLevel = document.getElementById('zoomLevel');
+  if (zoomLevel) {
+    zoomLevel.textContent = Math.round(this.state.currentScale * 100) + '%';
+  }
+
+  // NOWE: Synchronizuj tekst po przeskalowaniu
+  this.scrollToPageInText(window.ocrViewer?.state.currentPage || 1);
+}
 
   // === FULLSCREEN FUNCTIONS ===
 
@@ -396,23 +434,6 @@ class PdfViewerManager {
     }
   }
 
-  /**
-   * Wyszukiwanie w PDF
-   */
-  async searchInPdf() {
-    const searchInput = document.getElementById('pdfSearchInput');
-    if (!searchInput) return;
-
-    const query = searchInput.value.trim();
-    if (!query) {
-      window.alertManager.warning('Wprowadź tekst do wyszukania');
-      return;
-    }
-
-    // Tutaj można zaimplementować wyszukiwanie w treści PDF
-    // Na razie pokazujemy placeholder
-    window.alertManager.info(`Wyszukiwanie "${query}" będzie dostępne wkrótce`);
-  }
 
   // === AUTO-SAVE FUNCTIONS ===
 
@@ -556,7 +577,12 @@ class PdfViewerManager {
    */
   goToPage(pageNumber) {
     if (window.ocrViewer) {
-      window.ocrViewer.renderPage(pageNumber);
+        window.ocrViewer.renderPage(pageNumber);
+
+        // NOWE: Synchronizuj tekst po zmianie strony
+        setTimeout(() => {
+            this.scrollToPageInText(pageNumber);
+        }, 200); // Krótkie opóźnienie żeby OCR zdążył załadować tekst
     }
   }
 

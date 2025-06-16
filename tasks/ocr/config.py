@@ -48,6 +48,8 @@ WATCHDOG_TIMEOUT_SECONDS = 1800  # 30 minut na cały dokument
 
 # Ustawienia dla preprocessingu
 DPI = 300  # Rozdzielczość przy konwersji PDF -> obraz
+MAX_IMAGE_DIMENSION = int(os.getenv("OCR_MAX_IMAGE_DIMENSION", "1536"))  # Maksymalny rozmiar obrazu (dla oszczędności pamięci GPU)
+MIN_IMAGE_DIMENSION = int(os.getenv("OCR_MIN_IMAGE_DIMENSION", "1000"))  # Minimalny rozmiar obrazu (dla jakości OCR)
 # 'single'  → cały model na widoczną kartę (CUDA_VISIBLE_DEVICES)
 # 'auto'    → HuggingFace rozdziela warstwy na wszystkie karty
 DEVICE_STRATEGY = os.getenv("OCR_DEVICE_STRATEGY", "single").lower()

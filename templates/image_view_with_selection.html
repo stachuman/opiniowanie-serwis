@@ -25,7 +25,20 @@
     <div class="col-lg-8">
       <div class="card">
         <div class="card-header">
-          <h5 class="mb-0">{{ doc.original_filename }}</h5>
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">{{ doc.original_filename }}</h5>
+            <div class="btn-group" role="group" aria-label="Kontrolki obrazu">
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="rotateLeft" title="Obróć w lewo (90°)">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="rotateRight" title="Obróć w prawo (90°)">
+                <i class="bi bi-arrow-clockwise"></i>
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="resetRotation" title="Resetuj obrót">
+                <i class="bi bi-arrow-clockwise"></i> Reset
+              </button>
+            </div>
+          </div>
         </div>
         <div class="card-body p-0 position-relative">
           <!-- OCR Viewer Container -->
@@ -60,9 +73,6 @@
         <div class="card-header">
           <div class="d-flex justify-content-between align-items-center">
             <h5 class="mb-0">Rozpoznany tekst</h5>
-            <button type="button" class="btn btn-sm btn-outline-info toggle-edit-btn" id="toggleEditMode">
-              <i class="bi bi-pencil"></i> Edytuj
-            </button>
           </div>
         </div>
         <div class="card-body">
@@ -71,38 +81,15 @@
             <div class="d-flex justify-content-between mb-2">
               <h6 class="mb-0">Pełny tekst obrazu</h6>
               <div class="btn-group">
-                <button id="saveChangesBtn" class="btn btn-sm btn-outline-success save-changes-btn d-none">
-                  <i class="bi bi-save"></i> Zapisz zmiany
-                </button>
                 <button id="copyFullBtn" class="btn btn-sm btn-outline-secondary copy-text-btn" data-copy-target="#textDisplay">
                   <i class="bi bi-clipboard"></i> Kopiuj całość
                 </button>
               </div>
             </div>
 
-            <!-- Text Display/Edit Area -->
+            <!-- Text Display Area -->
             <div id="textDisplay" class="text-display border rounded p-2"
-                 style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; background-color: #f8f9fa; cursor: text; min-height: 100px;">
-            </div>
-
-            <!-- Hidden Text Editor -->
-            <div id="textEditor" class="text-editor d-none">
-              <textarea id="textEditArea" class="form-control" rows="20"
-                        style="font-family: 'Courier New', monospace; resize: vertical; min-height: 300px;"></textarea>
-              <div class="mt-2 d-flex justify-content-between">
-                <div class="text-muted small">
-                  <i class="bi bi-info-circle me-1"></i>
-                  Możesz edytować tekst aby poprawić błędy OCR przed zapisaniem.
-                </div>
-                <div>
-                  <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="ocrViewer.cancelEdit()">
-                    <i class="bi bi-x"></i> Anuluj
-                  </button>
-                  <button type="button" class="btn btn-sm btn-success" onclick="ocrViewer.saveEdit()">
-                    <i class="bi bi-check"></i> Zatwierdź zmiany
-                  </button>
-                </div>
-              </div>
+                 style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; background-color: #f8f9fa; min-height: 100px;">
             </div>
           </div>
         </div>
@@ -157,10 +144,11 @@ document.addEventListener('DOMContentLoaded', function() {
     parentId: {{ doc.parent_id or 'null' }}
   });
 
-  // Inicjalizuj Text Editor
+  // Inicjalizuj Text Editor (tylko do odczytu)
   const textEditor = new TextEditor('textEditorContainer', {
     docId: {{ doc.id }},
     autoSave: false,
+    readOnly: true,
     placeholder: 'Brak tekstu OCR dla tego obrazu...'
   });
 
@@ -196,8 +184,6 @@ document.addEventListener('DOMContentLoaded', function() {
   window.saveCurrentText = function() {
     return textEditor.saveChanges();
   };
-
-  console.log('Image Viewer z OCR zainicjalizowany');
 });
 
 // Obsługa przycisków uruchamiania OCR (jeśli są)

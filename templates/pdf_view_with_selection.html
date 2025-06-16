@@ -65,9 +65,6 @@
         <div class="card-header">
           <div class="d-flex justify-content-between align-items-center">
             <h5 class="mb-0">Rozpoznany tekst</h5>
-            <button type="button" class="btn btn-sm btn-outline-info toggle-edit-btn" id="toggleEditMode">
-              <i class="bi bi-pencil"></i> Edytuj
-            </button>
           </div>
         </div>
         <div class="card-body">
@@ -76,38 +73,15 @@
             <div class="d-flex justify-content-between mb-2">
               <h6 class="mb-0">Pełny tekst strony</h6>
               <div class="btn-group">
-                <button id="saveChangesBtn" class="btn btn-sm btn-outline-success save-changes-btn d-none">
-                  <i class="bi bi-save"></i> Zapisz zmiany
-                </button>
                 <button id="copyFullBtn" class="btn btn-sm btn-outline-secondary copy-text-btn" data-copy-target="#textDisplay">
                   <i class="bi bi-clipboard"></i> Kopiuj całość
                 </button>
               </div>
             </div>
 
-            <!-- Text Display/Edit Area -->
+            <!-- Text Display Area -->
             <div id="textDisplay" class="text-display border rounded p-2"
-                 style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; background-color: #f8f9fa; cursor: text; min-height: 100px;">
-            </div>
-
-            <!-- Hidden Text Editor -->
-            <div id="textEditor" class="text-editor d-none">
-              <textarea id="textEditArea" class="form-control" rows="20"
-                        style="font-family: 'Courier New', monospace; resize: vertical; min-height: 300px;"></textarea>
-              <div class="mt-2 d-flex justify-content-between">
-                <div class="text-muted small">
-                  <i class="bi bi-info-circle me-1"></i>
-                  Możesz edytować tekst aby poprawić błędy OCR przed zapisaniem.
-                </div>
-                <div>
-                  <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="ocrViewer.cancelEdit()">
-                    <i class="bi bi-x"></i> Anuluj
-                  </button>
-                  <button type="button" class="btn btn-sm btn-success" onclick="ocrViewer.saveEdit()">
-                    <i class="bi bi-check"></i> Zatwierdź zmiany
-                  </button>
-                </div>
-              </div>
+                 style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; background-color: #f8f9fa; min-height: 100px;">
             </div>
           </div>
         </div>
@@ -152,6 +126,7 @@
 <script>
 // Inicjalizacja OCR Viewer z konfiguracją specyficzną dla PDF
 let ocrViewer;
+let pdfViewerManager; // NOWE
 
 document.addEventListener('DOMContentLoaded', function() {
   // Inicjalizuj OCR Viewer
@@ -162,28 +137,32 @@ document.addEventListener('DOMContentLoaded', function() {
     parentId: {{ doc.parent_id or 'null' }}
   });
 
-  // Inicjalizuj Text Editor
+  // NOWE: Inicjalizuj PDF Viewer Manager
+  pdfViewerManager = new PdfViewerManager({{ doc.id }}, {
+    hasOcr: {{ 'true' if doc.ocr_status == 'done' else 'false' }},
+    parentId: {{ doc.parent_id or 'null' }}
+  });
+
+  // Inicjalizuj Text Editor (tylko do odczytu)
   const textEditor = new TextEditor('textEditorContainer', {
     docId: {{ doc.id }},
     autoSave: false,
+    readOnly: true,
     placeholder: 'Brak tekstu OCR dla tej strony...'
   });
 
-  // Udostępnij globalnie dla funkcji onclick w modalach
+  // Udostępnij globalnie
   window.ocrViewer = ocrViewer;
   window.textEditor = textEditor;
+  window.pdfViewerManager = pdfViewerManager; // NOWE
 
-  // === DODAJ TEN KOD TUTAJ ===
-  // Bezpośrednie połączenie komponentów (zastępuje system eventów)
-
-  // Funkcja do aktualizacji tekstu w edytorze z OCR
+  // Bezpośrednie połączenie komponentów (istniejący kod)
   window.updateTextFromOcr = function(text) {
     if (window.textEditor) {
       window.textEditor.setText(text);
     }
   };
 
-  // Funkcja do aktualizacji cache OCR w viewer
   window.updateOcrCache = function(text) {
     if (window.ocrViewer) {
       window.ocrViewer.state.ocrText[window.ocrViewer.state.currentPage] = text;
@@ -197,12 +176,9 @@ document.addEventListener('DOMContentLoaded', function() {
     window.updateTextFromOcr(text);
   };
 
-  // Funkcja helper do zapisywania zmian (dla kompatybilności)
   window.saveCurrentText = function() {
     return textEditor.saveChanges();
   };
-
-  console.log('PDF Viewer z OCR zainicjalizowany');
 });
 
 // Obsługa przycisków uruchamiania OCR (jeśli są)

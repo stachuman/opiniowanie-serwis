@@ -28,7 +28,9 @@ def list_opinions(request: Request,
                   k4: bool | None = None,
                   search: str | None = None,
                   search_content: bool = False,
-                  fuzzy_search: bool = False):
+                  fuzzy_search: bool = False,
+                  sort_by: str | None = None,
+                  sort_order: str = "asc"):
     """Lista opinii z filtrowaniem i wyszukiwaniem."""
 
     with Session(engine) as session:
@@ -69,7 +71,32 @@ def list_opinions(request: Request,
             # (użytkownik świadomie odznaczył wszystko)
             query = query.where(Document.id == -1)  # Brak wyników
 
-        opinions = session.exec(query.order_by(Document.upload_time.desc())).all()
+        # Sortowanie
+        if sort_by == "sygnatura":
+            if sort_order == "desc":
+                query = query.order_by(Document.sygnatura.desc())
+            else:
+                query = query.order_by(Document.sygnatura.asc())
+        elif sort_by == "filename":
+            if sort_order == "desc":
+                query = query.order_by(Document.original_filename.desc())
+            else:
+                query = query.order_by(Document.original_filename.asc())
+        elif sort_by == "last_modified":
+            if sort_order == "desc":
+                query = query.order_by(Document.last_modified.desc())
+            else:
+                query = query.order_by(Document.last_modified.asc())
+        elif sort_by == "status":
+            if sort_order == "desc":
+                query = query.order_by(Document.step.desc())
+            else:
+                query = query.order_by(Document.step.asc())
+        else:
+            # Domyślne sortowanie po czasie dodania (najnowsze pierwsze)
+            query = query.order_by(Document.upload_time.desc())
+
+        opinions = session.exec(query).all()
 
         # Wyszukiwanie (kod bez zmian - zachowujemy istniejącą logikę)
         search_matches = {}
@@ -115,7 +142,9 @@ def list_opinions(request: Request,
             'k4': k4,
             'search': search or '',
             'search_content': search_content,
-            'fuzzy_search': fuzzy_search
+            'fuzzy_search': fuzzy_search,
+            'sort_by': sort_by,
+            'sort_order': sort_order
         }
 
         # Zbuduj akcje strony

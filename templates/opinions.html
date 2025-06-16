@@ -147,11 +147,67 @@
       <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
           <tr>
-            <th scope="col">Dotyczy</th>
-            <th scope="col">Nazwa pliku</th>
+            <th scope="col">
+              <a href="{{ url_for('list_opinions') }}?{% if current_filters.k1 %}k1=true&{% endif %}{% if current_filters.k2 %}k2=true&{% endif %}{% if current_filters.k3 %}k3=true&{% endif %}{% if current_filters.k4 %}k4=true&{% endif %}{% if current_filters.search %}search={{ current_filters.search|urlencode }}&{% endif %}{% if current_filters.search_content %}search_content=true&{% endif %}{% if current_filters.fuzzy_search %}fuzzy_search=true&{% endif %}sort_by=sygnatura&sort_order={% if current_filters.sort_by == 'sygnatura' and current_filters.sort_order == 'asc' %}desc{% else %}asc{% endif %}" 
+                 class="text-decoration-none text-dark d-flex align-items-center">
+                Dotyczy
+                {% if current_filters.sort_by == 'sygnatura' %}
+                  {% if current_filters.sort_order == 'asc' %}
+                    <i class="bi bi-arrow-up ms-1"></i>
+                  {% else %}
+                    <i class="bi bi-arrow-down ms-1"></i>
+                  {% endif %}
+                {% else %}
+                  <i class="bi bi-arrow-up-down ms-1 text-muted"></i>
+                {% endif %}
+              </a>
+            </th>
+            <th scope="col">
+              <a href="{{ url_for('list_opinions') }}?{% if current_filters.k1 %}k1=true&{% endif %}{% if current_filters.k2 %}k2=true&{% endif %}{% if current_filters.k3 %}k3=true&{% endif %}{% if current_filters.k4 %}k4=true&{% endif %}{% if current_filters.search %}search={{ current_filters.search|urlencode }}&{% endif %}{% if current_filters.search_content %}search_content=true&{% endif %}{% if current_filters.fuzzy_search %}fuzzy_search=true&{% endif %}sort_by=filename&sort_order={% if current_filters.sort_by == 'filename' and current_filters.sort_order == 'asc' %}desc{% else %}asc{% endif %}" 
+                 class="text-decoration-none text-dark d-flex align-items-center">
+                Nazwa pliku
+                {% if current_filters.sort_by == 'filename' %}
+                  {% if current_filters.sort_order == 'asc' %}
+                    <i class="bi bi-arrow-up ms-1"></i>
+                  {% else %}
+                    <i class="bi bi-arrow-down ms-1"></i>
+                  {% endif %}
+                {% else %}
+                  <i class="bi bi-arrow-up-down ms-1 text-muted"></i>
+                {% endif %}
+              </a>
+            </th>
             <th scope="col">Notatka</th>
-            <th scope="col" class="text-center">Status</th>
-            <th scope="col">Ostatnia zmiana</th>
+            <th scope="col" class="text-center">
+              <a href="{{ url_for('list_opinions') }}?{% if current_filters.k1 %}k1=true&{% endif %}{% if current_filters.k2 %}k2=true&{% endif %}{% if current_filters.k3 %}k3=true&{% endif %}{% if current_filters.k4 %}k4=true&{% endif %}{% if current_filters.search %}search={{ current_filters.search|urlencode }}&{% endif %}{% if current_filters.search_content %}search_content=true&{% endif %}{% if current_filters.fuzzy_search %}fuzzy_search=true&{% endif %}sort_by=status&sort_order={% if current_filters.sort_by == 'status' and current_filters.sort_order == 'asc' %}desc{% else %}asc{% endif %}" 
+                 class="text-decoration-none text-dark d-flex align-items-center justify-content-center">
+                Status
+                {% if current_filters.sort_by == 'status' %}
+                  {% if current_filters.sort_order == 'asc' %}
+                    <i class="bi bi-arrow-up ms-1"></i>
+                  {% else %}
+                    <i class="bi bi-arrow-down ms-1"></i>
+                  {% endif %}
+                {% else %}
+                  <i class="bi bi-arrow-up-down ms-1 text-muted"></i>
+                {% endif %}
+              </a>
+            </th>
+            <th scope="col">
+              <a href="{{ url_for('list_opinions') }}?{% if current_filters.k1 %}k1=true&{% endif %}{% if current_filters.k2 %}k2=true&{% endif %}{% if current_filters.k3 %}k3=true&{% endif %}{% if current_filters.k4 %}k4=true&{% endif %}{% if current_filters.search %}search={{ current_filters.search|urlencode }}&{% endif %}{% if current_filters.search_content %}search_content=true&{% endif %}{% if current_filters.fuzzy_search %}fuzzy_search=true&{% endif %}sort_by=last_modified&sort_order={% if current_filters.sort_by == 'last_modified' and current_filters.sort_order == 'asc' %}desc{% else %}asc{% endif %}" 
+                 class="text-decoration-none text-dark d-flex align-items-center">
+                Ostatnia zmiana
+                {% if current_filters.sort_by == 'last_modified' %}
+                  {% if current_filters.sort_order == 'asc' %}
+                    <i class="bi bi-arrow-up ms-1"></i>
+                  {% else %}
+                    <i class="bi bi-arrow-down ms-1"></i>
+                  {% endif %}
+                {% else %}
+                  <i class="bi bi-arrow-up-down ms-1 text-muted"></i>
+                {% endif %}
+              </a>
+            </th>
             <th scope="col" class="text-center">Akcje</th>
           </tr>
         </thead>

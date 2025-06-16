@@ -30,6 +30,9 @@ from .config import (
 # Wyłączamy globalnie Flash‑Attention 2 – znany source segfaultów na Ampere
 os.environ["FLASH_ATTENTION_FORCE_DISABLED"] = "1"
 
+# KRYTYCZNE: Rozwiązanie fragmentacji pamięci PyTorch CUDA
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
 print(f"🔍 [OCR_MODELS] Importowano models.py w procesie PID={os.getpid()}")
 
 
@@ -204,9 +207,23 @@ def process_image_to_text(
         instruction: str = DEFAULT_OCR_INSTRUCTION,
         model=None,
         processor=None,
+        skip_preprocessing=False,
 ):
     """Rozpoznaje tekst z obrazu i zwraca go jako string."""
     print(f"🔍 [OCR_MODELS] process_image_to_text wywołane dla: {image_path}")
+
+    # Agresywne czyszczenie pamięci przed rozpoczęciem OCR
+    from .utils import aggressive_memory_cleanup, get_available_gpu_memory
+    aggressive_memory_cleanup()
+    
+    # Sprawdź dostępną pamięć GPU
+    gpu_info = get_available_gpu_memory()
+    if gpu_info.get("available", False):
+        free_memory_gb = gpu_info.get("free_memory", 0) / 1024  # Convert MB to GB
+        print(f"🔍 [OCR_MODELS] Dostępna pamięć GPU: {free_memory_gb:.2f} GB")
+        
+        if free_memory_gb < 2.0:  # Obniżamy próg do 2GB
+            print(f"⚠️ [OCR_MODELS] Mało pamięci GPU: {free_memory_gb:.2f} GB - będzie wolniej ale spróbujemy")
 
     try:
         from qwen_vl_utils import process_vision_info
@@ -234,6 +251,32 @@ def process_image_to_text(
         error_msg = f"Plik obrazu nie istnieje: {image_path}"
         print(f"❌ [OCR_MODELS] {error_msg}")
         return f"[Błąd: {error_msg}]"
+    
+    # KRYTYCZNE: Preprocessing obrazu PRZED wysłaniem do modelu OCR
+    # To zmniejsza obraz z 4032x3024 do 1536x1152 i obsługuje EXIF rotation
+    # Dla fragmentów może być pominięty
+    if not skip_preprocessing:
+        print(f"🔧 [OCR_MODELS] Preprocessing obrazu przed OCR...")
+        from .preprocessors import preprocess_image
+        
+        try:
+            preprocessed_image_path = preprocess_image(image_path)
+            print(f"✅ [OCR_MODELS] Preprocessing zakończony: {preprocessed_image_path}")
+            
+            # Inteligentny fallback - jeśli preprocessing się nie udał, użyj oryginału
+            if preprocessed_image_path == image_path:
+                print(f"⚠️ [OCR_MODELS] Preprocessing nie zmienił obrazu - używam oryginału")
+            else:
+                # Użyj przetworzonego obrazu dla OCR
+                image_path = preprocessed_image_path
+                print(f"🔧 [OCR_MODELS] Używam przetworzonego obrazu dla OCR")
+                
+        except Exception as e:
+            print(f"⚠️ [OCR_MODELS] Błąd preprocessing, używam oryginału: {e}")
+            # Kontynuuj z oryginalnym obrazem
+    else:
+        print(f"🔧 [OCR_MODELS] Pominięto preprocessing (skip_preprocessing=True)")
+        preprocessed_image_path = str(image_path)
 
     try:
         messages = [
@@ -279,6 +322,76 @@ def process_image_to_text(
                     # pad_token_id=processor.tokenizer.pad_token_id,
                 )
             print(f"✅ [OCR_MODELS] Generacja zakończona pomyślnie")
+        except torch.cuda.OutOfMemoryError as oom_error:
+            # Fallback mechanism - try with smaller image if OOM occurs
+            print(f"🚨 [OCR_MODELS] CUDA OOM podczas generacji: {str(oom_error)}")
+            logger.error(f"CUDA OOM podczas generacji: {str(oom_error)}")
+            
+            # Spróbuj z mniejszym obrazem (75% oryginalnego rozmiaru po preprocessing)
+            try:
+                print(f"🔧 [OCR_MODELS] Próba fallback z mniejszym obrazem...")
+                from .utils import aggressive_memory_cleanup
+                aggressive_memory_cleanup()
+                
+                # Przeskaluj obraz do 75% rozmiaru
+                from PIL import Image as PILImage
+                with PILImage.open(image_path) as img:
+                    original_size = img.size
+                    new_size = (int(original_size[0] * 0.75), int(original_size[1] * 0.75))
+                    img_resized = img.resize(new_size, PILImage.LANCZOS)
+                    
+                    # Zapisz zmniejszony obraz
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
+                        fallback_path = tmp_img.name
+                    img_resized.save(fallback_path, "PNG")
+                    
+                print(f"🔧 [OCR_MODELS] Fallback - zmniejszono z {original_size} do {new_size}")
+                
+                # Przygotuj inputs dla mniejszego obrazu
+                fallback_messages = [
+                    {
+                        "role": "system",
+                        "content": [{"type": "text", "text": "You are OCR system for text recognition."}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": fallback_path},
+                            {"type": "text", "text": instruction},
+                        ],
+                    },
+                ]
+                
+                fallback_text_prompt = processor.apply_chat_template(fallback_messages, tokenize=False, add_generation_prompt=True)
+                fallback_image_inputs, fallback_video_inputs = process_vision_info(fallback_messages)
+                
+                fallback_inputs = processor(
+                    text=[fallback_text_prompt],
+                    images=fallback_image_inputs,
+                    videos=fallback_video_inputs,
+                    padding=True,
+                    return_tensors="pt",
+                ).to(model.device)
+                
+                # Próba generacji z mniejszym obrazem
+                with torch.no_grad():
+                    gen_ids = model.generate(
+                        **fallback_inputs,
+                        max_new_tokens=MAX_NEW_TOKENS
+                    )
+                print(f"✅ [OCR_MODELS] Fallback zakończony pomyślnie")
+                
+                # Usuń tymczasowy plik
+                try:
+                    Path(fallback_path).unlink()
+                except:
+                    pass
+                    
+            except Exception as fallback_error:
+                print(f"❌ [OCR_MODELS] Fallback też się nie udał: {str(fallback_error)}")
+                logger.error(f"Fallback też się nie udał: {str(fallback_error)}")
+                return f"[Błąd OCR: CUDA out of memory. Tried to allocate memory for image processing. Both original and fallback attempts failed.]"
         except TimeoutError:
             error_msg = f"Timeout > {OCR_TIMEOUT_SECONDS} s – pominięto stronę"
             print(f"⏰ [OCR_MODELS] {error_msg}")
@@ -293,11 +406,24 @@ def process_image_to_text(
 
         print(f"✅ [OCR_MODELS] OCR zakończony, długość tekstu: {len(text)}")
 
-        # cleanup RAM
+        # cleanup RAM i GPU memory
         del inputs, gen_ids, image_inputs, video_inputs
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.synchronize()  # Synchronizacja CUDA
+            
+        # Dodatkowe czyszczenie pamięci
+        from .utils import aggressive_memory_cleanup
+        aggressive_memory_cleanup()
+        
+        # Usuń tymczasowy plik z preprocessing jeśli istnieje  
+        try:
+            if not skip_preprocessing and 'preprocessed_image_path' in locals() and preprocessed_image_path != image_path:
+                Path(preprocessed_image_path).unlink()
+                print(f"🧹 [OCR_MODELS] Usunięto tymczasowy plik: {preprocessed_image_path}")
+        except Exception as cleanup_error:
+            print(f"⚠️ [OCR_MODELS] Nie udało się usunąć tymczasowego pliku: {cleanup_error}")
 
         return text.strip()
 

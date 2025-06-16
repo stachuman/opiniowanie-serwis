@@ -92,9 +92,11 @@ class TextEditor {
             }
         }
 
-        // POTEM utwórz przyciski
-        this.elements.toggleBtn = this.container.querySelector('.toggle-edit-btn') || this.createToggleButton();
-        this.elements.saveBtn = this.container.querySelector('.save-changes-btn') || this.createSaveButton();
+        // POTEM utwórz przyciski (tylko jeśli nie readOnly)
+        if (!this.config.readOnly) {
+            this.elements.toggleBtn = this.container.querySelector('.toggle-edit-btn') || this.createToggleButton();
+            this.elements.saveBtn = this.container.querySelector('.save-changes-btn') || this.createSaveButton();
+        }
         this.elements.copyBtn = this.container.querySelector('.copy-text-btn') || this.createCopyButton();
 
         // NA KOŃCU utwórz toolbar (który używa przycisków)
@@ -190,13 +192,13 @@ class TextEditor {
      * Bindowanie event handlerów - Z ZABEZPIECZENIAMI
      */
     bindEvents() {
-        // Toggle edit mode
-        if (this.elements.toggleBtn) {
+        // Toggle edit mode (tylko jeśli nie readOnly)
+        if (this.elements.toggleBtn && !this.config.readOnly) {
             this.elements.toggleBtn.addEventListener('click', () => this.toggleEditMode());
         }
 
-        // Save changes
-        if (this.elements.saveBtn) {
+        // Save changes (tylko jeśli nie readOnly)
+        if (this.elements.saveBtn && !this.config.readOnly) {
             this.elements.saveBtn.addEventListener('click', () => this.saveChanges());
         }
 
@@ -205,14 +207,12 @@ class TextEditor {
             this.elements.copyBtn.addEventListener('click', () => this.copyToClipboard());
         }
 
-        // Text changes monitoring - TYLKO JEŚLI TEXTAREA ISTNIEJE
-        if (this.elements.textarea) {
+        // Text changes monitoring - TYLKO JEŚLI TEXTAREA ISTNIEJE I NIE READONLY
+        if (this.elements.textarea && !this.config.readOnly) {
             this.elements.textarea.addEventListener('input', () => this.onTextChange());
             this.elements.textarea.addEventListener('paste', () => {
                 setTimeout(() => this.onTextChange(), 10);
             });
-        } else {
-            console.warn('Textarea not found - text change monitoring disabled');
         }
 
         // WYŁĄCZONE: Display area click to enter edit mode - przeszkadza w zaznaczaniu tekstu
@@ -224,8 +224,10 @@ class TextEditor {
         });
         */
 
-        // Monitor display area changes (external updates)
-        this.setupDisplayMonitoring();
+        // Monitor display area changes (external updates) - tylko jeśli nie readOnly
+        if (!this.config.readOnly) {
+            this.setupDisplayMonitoring();
+        }
     }
 
 
@@ -281,14 +283,30 @@ class TextEditor {
         const rightGroup = document.createElement('div');
         rightGroup.className = 'd-flex gap-2';
 
-        leftGroup.appendChild(this.elements.toggleBtn);
-        rightGroup.appendChild(this.elements.saveBtn);
-        rightGroup.appendChild(this.elements.copyBtn);
+        // Dodaj przyciski tylko jeśli istnieją
+        if (this.elements.toggleBtn) {
+            leftGroup.appendChild(this.elements.toggleBtn);
+        }
+        if (this.elements.saveBtn) {
+            rightGroup.appendChild(this.elements.saveBtn);
+        }
+        if (this.elements.copyBtn) {
+            rightGroup.appendChild(this.elements.copyBtn);
+        }
 
-        toolbar.appendChild(leftGroup);
-        toolbar.appendChild(rightGroup);
+        // Dodaj grupy tylko jeśli mają dzieci
+        if (leftGroup.children.length > 0) {
+            toolbar.appendChild(leftGroup);
+        }
+        if (rightGroup.children.length > 0) {
+            toolbar.appendChild(rightGroup);
+        }
 
-        this.container.insertBefore(toolbar, this.container.firstChild);
+        // Jeśli toolbar jest pusty, nie dodawaj go
+        if (toolbar.children.length > 0) {
+            this.container.insertBefore(toolbar, this.container.firstChild);
+        }
+        
         return toolbar;
     }
     
@@ -311,6 +329,11 @@ class TextEditor {
      * Konfiguracja skrótów klawiszowych
      */
     setupKeyboardShortcuts() {
+        // Nie dodawaj skrótów edycji gdy readOnly
+        if (this.config.readOnly) {
+            return;
+        }
+
         document.addEventListener('keydown', (e) => {
             // Tylko gdy edytor ma focus lub jest w trybie edycji
             if (!this.container.contains(document.activeElement) && !this.state.isEditMode) {
@@ -349,7 +372,7 @@ class TextEditor {
      * Konfiguracja auto-save
      */
     setupAutoSave() {
-        if (this.config.autoSave && this.config.docId) {
+        if (this.config.autoSave && this.config.docId && !this.config.readOnly) {
             this.state.autoSaveTimer = setInterval(() => {
                 if (this.state.textChanged && !this.state.isEditMode) {
                     this.saveChanges(true); // silent save
@@ -475,16 +498,24 @@ class TextEditor {
         if (hasChanges) {
             if (!this.state.textChanged) {
                 this.state.textChanged = true;
-                this.elements.saveBtn.classList.remove('d-none');
-                this.elements.displayArea.style.backgroundColor = '#fff3cd';
-                this.elements.displayArea.style.border = '2px solid #ffc107';
+                if (this.elements.saveBtn) {
+                    this.elements.saveBtn.classList.remove('d-none');
+                }
+                if (this.elements.displayArea) {
+                    this.elements.displayArea.style.backgroundColor = '#fff3cd';
+                    this.elements.displayArea.style.border = '2px solid #ffc107';
+                }
             }
         } else {
             if (this.state.textChanged) {
                 this.state.textChanged = false;
-                this.elements.saveBtn.classList.add('d-none');
-                this.elements.displayArea.style.backgroundColor = '';
-                this.elements.displayArea.style.border = '';
+                if (this.elements.saveBtn) {
+                    this.elements.saveBtn.classList.add('d-none');
+                }
+                if (this.elements.displayArea) {
+                    this.elements.displayArea.style.backgroundColor = '';
+                    this.elements.displayArea.style.border = '';
+                }
             }
         }
     }
@@ -601,6 +632,8 @@ class TextEditor {
      * Pokazuje wskaźnik zapisywania
      */
     showSaveIndicator() {
+        if (!this.elements.saveBtn) return;
+        
         const originalHtml = this.elements.saveBtn.innerHTML;
         this.elements.saveBtn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Zapisywanie...';
         this.elements.saveBtn.disabled = true;
@@ -612,6 +645,8 @@ class TextEditor {
      * Ukrywa wskaźnik zapisywania
      */
     hideSaveIndicator() {
+        if (!this.elements.saveBtn) return;
+        
         if (this.elements.saveBtn._originalHtml) {
             this.elements.saveBtn.innerHTML = this.elements.saveBtn._originalHtml;
             delete this.elements.saveBtn._originalHtml;
