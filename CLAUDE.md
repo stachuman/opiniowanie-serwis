@@ -71,6 +71,54 @@ uvicorn app.main:app --host 0.0.0.0 --port 80 --reload
 - OCR status tracking: none/pending/running/done/fail
 - Multiple OCR engines: Tesseract, TrOCR, Qwen2.5-VL-7B-Instruct
 
+## Case Status Management (NEW)
+
+### Configuration System
+The application now uses a centralized configuration system for case statuses instead of hardcoded values:
+
+- **`app/config/case_statuses.py`** - Main configuration file for all case statuses
+- **Dynamic status system** - Supports adding new statuses without code changes
+- **Default visibility control** - Each status can be set to show/hide by default in filters
+
+### Current Status Configuration
+```python
+# Current statuses (can be extended):
+k1    - Niekompletne dokumenty (default: visible)
+k1.5  - Brak części dokumentów (default: visible) 
+k2    - Komplet dokumentów (default: visible)
+k2.5  - Word gotowy, niewysłany (default: visible)
+k3    - Word z wyciągiem wysłany (default: hidden)
+k4    - Archiwum (default: hidden)
+```
+
+### Adding New Statuses
+To add a new case status, simply add a new `CaseStatus` entry in `app/config/case_statuses.py`:
+
+```python
+CaseStatus(
+    code="k5",                    # Unique status code
+    name="k5 – Status Name",      # Display name
+    description="Status desc",    # Detailed description
+    color="info",                 # Bootstrap color (danger, warning, success, etc.)
+    icon="star-fill",            # Bootstrap icon name
+    default_visible=True,        # Show in default filters
+    sort_order=7                 # Display order
+)
+```
+
+The system will automatically:
+- Add the status to filter checkboxes
+- Include it in sorting and search
+- Apply correct colors and icons
+- Handle default visibility in filters
+
+### Status System Features
+- **Flexible filtering** - Any combination of statuses can be filtered
+- **Dynamic UI generation** - Frontend automatically adapts to new statuses
+- **Consistent styling** - Colors and icons defined in one place
+- **Default filter behavior** - Control which statuses show by default
+- **Backward compatibility** - Existing templates and JS work with new statuses
+
 ## Important Technical Notes
 
 ### CUDA Configuration
@@ -117,3 +165,82 @@ uvicorn app.main:app --host 0.0.0.0 --port 80 --reload
 
 - `DB_URL` - Database connection (defaults to sqlite:///data.db)
 - CUDA-related variables set automatically in main.py
+
+## Document Type Management (NEW)
+
+### Configuration System
+The application uses a centralized configuration system for document types, similar to case statuses:
+
+- **`app/config/document_types.py`** - Main configuration file for all document types
+- **Dynamic type system** - Supports adding new types without code changes
+- **Default visibility control** - Each type can be set to show/hide by default in filters
+
+### Current Document Type Configuration
+```python
+# Current document types (can be extended):
+opinia                 - Opinia (primary, file-earmark-text icon)
+postanowienie         - Postanowienie (primary, file-earmark icon)
+protokol              - Protokoły przesłuchań i zarzuty (primary, file-earmark icon)
+akta                  - Akta (secondary, folder2-open icon)
+dokumentacja_medyczna - Dokumentacja medyczna (danger, heart-pulse icon)
+wniosek              - Wniosek (info, file-earmark-plus icon)
+zaswiadczenie        - Zaświadczenie (success, award icon)
+inne                 - Inne (warning, file-earmark icon)
+ocr_txt              - OCR TXT (secondary, file-earmark-text icon, hidden by default)
+archiwalna_wersja    - Archiwalna wersja (secondary, archive icon, hidden by default)
+```
+
+### Adding New Document Types
+To add a new document type, simply add a new `DocumentType` entry in `app/config/document_types.py`:
+
+```python
+DocumentType(
+    code="new_type",             # Unique type code
+    name="New Type Name",        # Display name
+    description="Type desc",     # Detailed description
+    color="success",             # Bootstrap color (primary, success, danger, etc.)
+    icon="star-fill",           # Bootstrap icon name
+    default_visible=True,       # Show in default filters
+    sort_order=9               # Display order
+)
+```
+
+The system will automatically:
+- Update all dropdowns and forms
+- Apply consistent styling and icons
+- Handle backward compatibility with old string values
+- Include it in filtering and search
+
+### Document Type Features
+- **Flexible configuration** - Easy to add, modify, or reorganize types
+- **Dynamic UI generation** - Forms and dropdowns update automatically
+- **Consistent styling** - Colors and icons defined in one place
+- **Backward compatibility** - Old string-based types are converted automatically
+- **Migration utility** - Safe conversion from legacy format to new codes
+
+### Data Migration
+Document types were migrated from old string format to new code-based system:
+- **Migration script**: `app/migrations/migrate_document_types.py`
+- **152 documents migrated successfully** with 100% success rate
+- **Backward compatibility maintained** - supports both old and new formats
+- **Migration features**: dry-run mode, rollback capability, statistics reporting
+
+## Recent Changes Summary
+
+### Document Type System Implementation (Latest)
+- **Centralized configuration** in `app/config/document_types.py`
+- **Dynamic type system** - removed hardcoded document type arrays
+- **Extended type set** - includes system types like OCR TXT and archive versions
+- **Configurable default filters** - system types hidden by default, user types visible
+- **Template improvements** - dynamic dropdown generation with icons
+- **Data migration completed** - all 152 existing documents successfully migrated
+- **Backward compatibility** maintained while enabling future extensibility
+
+### Case Status System Refactoring
+- **Centralized configuration** in `app/config/case_statuses.py`
+- **Dynamic status handling** - removed hardcoded k1-k4 parameters
+- **Extended status set** - now includes k1.5 and k2.5 intermediate statuses
+- **Configurable default filters** - k3 and k4 hidden by default, others visible
+- **Template improvements** - dynamic checkbox generation and URL building
+- **JavaScript updates** - flexible status checkbox handling
+- **Backward compatibility** maintained while enabling future extensibility

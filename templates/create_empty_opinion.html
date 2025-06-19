@@ -36,10 +36,11 @@
         <label for="doc_type" class="form-label">Rodzaj dokumentu</label>
         <select class="form-select" id="doc_type" name="doc_type" required>
           <option value="">-- Wybierz rodzaj dokumentu --</option>
-          <option value="Opinia" selected>Opinia</option>
-          <option value="Ekspertyza">Ekspertyza</option>
-          <option value="Orzeczenie">Orzeczenie</option>
-          <option value="Inne">Inne</option>
+          {% for doc_type in document_types %}
+            <option value="{{ doc_type.code }}" {% if doc_type.code == 'opinia' %}selected{% endif %}>
+              <i class="bi bi-{{ doc_type.icon }}"></i> {{ doc_type.name }}
+            </option>
+          {% endfor %}
         </select>
       </div>
 

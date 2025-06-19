@@ -54,10 +54,12 @@
       <div class="col-12 col-md-4">
         <label class="form-label">Rodzaj dokumentu</label>
         <select name="doc_type" class="form-select">
-          {% set types = ['Opinia', 'Akta', 'Dokumentacja medyczna', 'Wniosek', 'Zaświadczenie', 'Inne'] %}
           <option value="" {% if not doc.doc_type %}selected{% endif %}>– wybierz –</option>
-          {% for t in types %}
-            <option value="{{ t }}" {% if t==doc.doc_type %}selected{% endif %}>{{ t }}</option>
+          {% for doc_type in document_types %}
+            <option value="{{ doc_type.code }}" 
+                    {% if doc_type.code == doc.doc_type or doc_type.name == doc.doc_type %}selected{% endif %}>
+              {{ doc_type.name }}
+            </option>
           {% endfor %}
         </select>
       </div>

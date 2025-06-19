@@ -13,6 +13,7 @@ from app.models import Document
 from app.search import is_fuzzy_match, normalize_text_for_search
 from app.document_utils import STEP_ICON
 from app.text_extraction import get_document_text_content, HAS_DOCX
+from app.config import case_status_config
 
 # Moduł nawigacji
 from app.navigation import build_opinion_navigation, PageActionsBuilder
@@ -22,10 +23,6 @@ router = APIRouter()
 
 @router.get("/", name="list_opinions")
 def list_opinions(request: Request,
-                  k1: bool | None = None,
-                  k2: bool | None = None,
-                  k3: bool | None = None,
-                  k4: bool | None = None,
                   search: str | None = None,
                   search_content: bool = False,
                   fuzzy_search: bool = False,
@@ -37,35 +34,26 @@ def list_opinions(request: Request,
         # Pobierz wszystkie główne dokumenty (opinie)
         query = select(Document).where(Document.is_main == True)
 
+        # Pobierz wszystkie dostępne statusy z konfiguracji
+        all_status_codes = [status.code for status in case_status_config.get_all_statuses()]
+        
         # Sprawdź czy to pierwsza wizyta czy użytkownik faktycznie filtruje
         query_params = request.query_params
-        has_any_filter_params = any(param in query_params for param in ['k1', 'k2', 'k3', 'k4', 'search'])
+        status_filter_params = [code for code in all_status_codes if code in query_params]
+        has_any_filter_params = status_filter_params or 'search' in query_params
 
+        # Ustal aktywne filtry statusów
         if not has_any_filter_params:
-            # PIERWSZA WIZYTA - ustaw domyślne filtry (k1, k2, k3 = True, k4 = False)
-            k1, k2, k3, k4 = True, True, True, False
+            # PIERWSZA WIZYTA - użyj domyślnie widocznych statusów z konfiguracji
+            active_status_filters = case_status_config.get_default_visible_codes()
         else:
-            # UŻYTKOWNIK FILTRUJE - użyj dokładnie tego co przesłał
-            # Checkboxy które nie są zaznaczone w ogóle nie są przesyłane, więc None oznacza False
-            k1 = k1 if k1 is not None else False
-            k2 = k2 if k2 is not None else False
-            k3 = k3 if k3 is not None else False
-            k4 = k4 if k4 is not None else False
+            # UŻYTKOWNIK FILTRUJE - użyj tylko te statusy które są w query params
+            # Checkboxy które nie są zaznaczone w ogóle nie są przesyłane
+            active_status_filters = status_filter_params
 
-        # Zastosuj filtry statusów - tylko te które są True
-        status_filters = []
-        if k1:
-            status_filters.append("k1")
-        if k2:
-            status_filters.append("k2")
-        if k3:
-            status_filters.append("k3")
-        if k4:
-            status_filters.append("k4")
-
-        # Jeśli wybrano jakieś filtry, zastosuj je
-        if status_filters:
-            query = query.where(Document.step.in_(status_filters))
+        # Zastosuj filtry statusów
+        if active_status_filters:
+            query = query.where(Document.step.in_(active_status_filters))
         else:
             # Jeśli żaden filtr nie jest aktywny, pokaż pustą listę
             # (użytkownik świadomie odznaczył wszystko)
@@ -136,16 +124,17 @@ def list_opinions(request: Request,
 
         # Przygotuj dane filtrów do wyświetlenia
         current_filters = {
-            'k1': k1,
-            'k2': k2,
-            'k3': k3,
-            'k4': k4,
             'search': search or '',
             'search_content': search_content,
             'fuzzy_search': fuzzy_search,
             'sort_by': sort_by,
-            'sort_order': sort_order
+            'sort_order': sort_order,
+            'active_statuses': active_status_filters
         }
+        
+        # Dodaj każdy status osobno dla kompatybilności z template
+        for status_code in all_status_codes:
+            current_filters[status_code] = status_code in active_status_filters
 
         # Zbuduj akcje strony
         actions = (PageActionsBuilder(request)
@@ -172,6 +161,10 @@ def list_opinions(request: Request,
             "search_matches": search_matches,
             "current_year": datetime.now().year,
             "page_type": "opinions_list",  # NOWE: Dodany page_type
+            # Dane statusów z konfiguracji
+            "all_statuses": case_status_config.get_all_statuses(),
+            "status_colors": case_status_config.get_status_colors(),
+            "status_icons": case_status_config.get_status_icons(),
             # Elementy nawigacji
             "page_title": "Lista opinii",
             "page_actions": actions,
@@ -229,10 +222,8 @@ def opinion_detail(request: Request, doc_id: int):
                 grouped_docs[doc_type] = []
             grouped_docs[doc_type].append(doc)
 
-        steps = [("k1", "k1 – Niekompletne dokumenty"),
-                 ("k2", "k2 – Komplet dokumentów"),
-                 ("k3", "k3 – Word z wyciągiem wysłany"),
-                 ("k4", "k4 – Archiwum")]
+        # Pobierz steps z konfiguracji
+        steps = [(status.code, status.name) for status in case_status_config.get_all_statuses()]
 
         # Zbuduj nawigację za pomocą helpera
         navigation = build_opinion_navigation(request, opinion, session)
@@ -247,12 +238,7 @@ def opinion_detail(request: Request, doc_id: int):
             "related_docs": related_docs,  # DODANE: Potrzebne dla opinion_detail.html
             "grouped_docs": grouped_docs,
             "steps": steps,
-            "steps_dict": {  # DODANE: Mapowanie kroków
-                "k1": "k1 – Niekompletne dokumenty",
-                "k2": "k2 – Komplet dokumentów",
-                "k3": "k3 – Word z wyciągiem wysłany",
-                "k4": "k4 – Archiwum"
-            },
+            "steps_dict": case_status_config.get_status_dict(),  # Mapowanie z konfiguracji
             "title": navigation['page_title'],
             "total_docs": total_docs,
             "pending_docs": pending_docs,

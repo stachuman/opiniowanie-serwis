@@ -148,7 +148,7 @@ def get_ocr_text_for_document(doc_id, session):
         # ✅ POPRAWKA: Sortuj po upload_time DESC aby pobrać NAJNOWSZY dokument OCR
         ocr_txt_query = select(Document).where(
             Document.ocr_parent_id == doc_id,
-            Document.doc_type == "OCR TXT"
+            Document.doc_type == "ocr_txt"
         ).order_by(Document.upload_time.desc())  # NAJNOWSZY PIERWSZY
 
         ocr_txt = session.exec(ocr_txt_query).first()  # Teraz .first() bierze najnowszy
@@ -207,7 +207,7 @@ def get_document_text_content(document, session=None):
         text_content = extract_text_from_pdf(file_path)
     elif document.mime_type and 'word' in document.mime_type:
         text_content = extract_text_from_word(file_path)
-    elif document.mime_type == 'text/plain' or document.doc_type == "OCR TXT":
+    elif document.mime_type == 'text/plain' or document.doc_type == "ocr_txt":
         # Dla plików tekstowych i wyników OCR
         try:
             encodings = ['utf-8', 'latin-1', 'cp1250']

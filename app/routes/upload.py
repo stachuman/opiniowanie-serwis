@@ -16,6 +16,9 @@ from app.models import Document
 from app.document_utils import ALLOWED_EXTENSIONS
 from app.navigation import build_form_navigation, BreadcrumbBuilder
 
+# Import konfiguracji typów dokumentów
+from app.config.document_types import document_type_config
+
 # Import managera z tasks
 from tasks.upload_manager import upload_manager
 
@@ -65,9 +68,13 @@ def create_empty_opinion_form(request: Request):
 
     # Zbuduj nawigację dla formularza create
     navigation = build_form_navigation(request, "Utwórz pustą opinię", "create")
+    
+    # Pobierz typy dokumentów z konfiguracji
+    document_types = document_type_config.get_all_types()
 
     context = {
         "request": request,
+        "document_types": document_types,
         "current_year": datetime.now().year,
         "page_type": "upload_form",
         **navigation
@@ -154,10 +161,14 @@ def upload_to_opinion_form(request: Request, doc_id: int):
         }
 
     allowed_types = ", ".join(ALLOWED_EXTENSIONS.keys())
+    
+    # Pobierz typy dokumentów z konfiguracji
+    document_types = document_type_config.get_all_types()
 
     context = {
         "request": request,
         "opinion": opinion,
+        "document_types": document_types,
         "allowed_types": allowed_types,
         "current_year": datetime.now().year,
         "page_type": "upload_form",

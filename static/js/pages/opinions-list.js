@@ -198,13 +198,16 @@ class OpinionsListManager {
     const form = document.getElementById('opinionsFilterForm');
     if (!form) return;
 
-    // Obsługa checkboxów filtrów
-    const checkboxes = form.querySelectorAll('input[type="checkbox"][name^="k"]');
-    checkboxes.forEach(checkbox => {
-      checkbox.addEventListener('change', () => {
-        clearTimeout(this.formSubmitTimeout);
-        this.formSubmitTimeout = setTimeout(() => form.submit(), 500);
-      });
+    // Obsługa checkboxów filtrów statusów - znajdź wszystkie checkboxy statusów dynamicznie
+    const statusCheckboxes = form.querySelectorAll('input[type="checkbox"][id^="check_"]');
+    statusCheckboxes.forEach(checkbox => {
+      // Sprawdź czy to checkbox statusu (nie search_content ani fuzzy_search)
+      if (!['search_content', 'fuzzy_search'].includes(checkbox.name)) {
+        checkbox.addEventListener('change', () => {
+          clearTimeout(this.formSubmitTimeout);
+          this.formSubmitTimeout = setTimeout(() => form.submit(), 500);
+        });
+      }
     });
 
     // Obsługa checkbox wyszukiwania w treści
@@ -269,7 +272,7 @@ class OpinionsListManager {
     const selectAllBtn = document.getElementById('selectAllBtn');
     if (selectAllBtn) {
       selectAllBtn.addEventListener('click', () => {
-        const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
+        const checkboxes = document.querySelectorAll('input[type="checkbox"][id^="check_"]:not([name="search_content"]):not([name="fuzzy_search"])');
         checkboxes.forEach(checkbox => checkbox.checked = true);
       });
     }
@@ -278,7 +281,7 @@ class OpinionsListManager {
     const deselectAllBtn = document.getElementById('deselectAllBtn');
     if (deselectAllBtn) {
       deselectAllBtn.addEventListener('click', () => {
-        const checkboxes = document.querySelectorAll('input[type="checkbox"][name^="k"]');
+        const checkboxes = document.querySelectorAll('input[type="checkbox"][id^="check_"]:not([name="search_content"]):not([name="fuzzy_search"])');
         checkboxes.forEach(checkbox => checkbox.checked = false);
       });
     }

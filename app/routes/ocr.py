@@ -93,7 +93,7 @@ async def get_opinion_ocr_status(opinion_id: int):
         related_docs = session.exec(
             select(Document).where(
                 Document.parent_id == opinion_id,
-                Document.doc_type != "OCR TXT"  # Ignoruj wyniki OCR
+                Document.doc_type != "ocr_txt"  # Ignoruj wyniki OCR
             )
         ).all()
 
@@ -198,7 +198,7 @@ async def document_ocr_selection(request: Request, doc_id: int):
 
                     ocr_txt_query = select(Document).where(
                         Document.ocr_parent_id == doc_id,
-                        Document.doc_type == "OCR TXT"
+                        Document.doc_type == "ocr_txt"
                     ).order_by(Document.upload_time.desc())  # ✅ NAJNOWSZY PIERWSZY
                     ocr_txt = session.exec(ocr_txt_query).first()
 
@@ -260,7 +260,7 @@ async def document_ocr_selection(request: Request, doc_id: int):
                 if is_full_image:
                     ocr_txt_query = select(Document).where(
                         Document.ocr_parent_id == doc_id,
-                        Document.doc_type == "OCR TXT"
+                        Document.doc_type == "ocr_txt"
                     ).order_by(Document.upload_time.desc())  # ✅ NAJNOWSZY PIERWSZY
                     ocr_txt = session.exec(ocr_txt_query).first()
                 

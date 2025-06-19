@@ -4,6 +4,10 @@
 {% set page_type = 'opinions_list' %}
 {% set page_title = 'Lista opinii sądowych' %}
 
+{% macro sort_url(sort_field) -%}
+{{ url_for('list_opinions') }}?{% for status in all_statuses %}{% if current_filters[status.code] %}{{ status.code }}=true&{% endif %}{% endfor %}{% if current_filters.search %}search={{ current_filters.search|urlencode }}&{% endif %}{% if current_filters.search_content %}search_content=true&{% endif %}{% if current_filters.fuzzy_search %}fuzzy_search=true&{% endif %}sort_by={{ sort_field }}&sort_order={% if current_filters.sort_by == sort_field and current_filters.sort_order == 'asc' %}desc{% else %}asc{% endif %}
+{%- endmacro %}
+
 {% block content %}
 <!-- Alerty -->
 {% if request.query_params.get('delete_message') %}
@@ -32,34 +36,15 @@
       <div class="col-md-6">
         <label class="form-label">Status opinii</label>
         <div class="d-flex flex-wrap gap-3">
+          {% for status in all_statuses %}
           <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="k1" id="check_k1"
-                   {% if current_filters.k1 %}checked{% endif %}>
-            <label class="form-check-label" for="check_k1">
-              <span class="badge bg-danger me-1">k1</span> Niekompletne dokumenty
+            <input class="form-check-input" type="checkbox" name="{{ status.code }}" id="check_{{ status.code }}"
+                   {% if current_filters[status.code] %}checked{% endif %}>
+            <label class="form-check-label" for="check_{{ status.code }}">
+              <span class="badge bg-{{ status.color }} me-1">{{ status.code }}</span> {{ status.description }}
             </label>
           </div>
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="k2" id="check_k2"
-                   {% if current_filters.k2 %}checked{% endif %}>
-            <label class="form-check-label" for="check_k2">
-              <span class="badge bg-warning me-1">k2</span> Komplet dokumentów
-            </label>
-          </div>
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="k3" id="check_k3"
-                   {% if current_filters.k3 %}checked{% endif %}>
-            <label class="form-check-label" for="check_k3">
-              <span class="badge bg-success me-1">k3</span> Word z wyciągiem wysłany
-            </label>
-          </div>
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="k4" id="check_k4"
-                   {% if current_filters.k4 %}checked{% endif %}>
-            <label class="form-check-label" for="check_k4">
-              <span class="badge bg-secondary me-1">k4</span> Archiwum
-            </label>
-          </div>
+          {% endfor %}
         </div>
       </div>
 
@@ -132,7 +117,7 @@
       <span class="badge bg-primary">
         {% if total_count %}
           Wyświetlane: {{ total_count }}
-          {% if current_filters.search or not (current_filters.k1 and current_filters.k2 and current_filters.k3 and current_filters.k4) %}
+          {% if current_filters.search or current_filters.active_statuses|length < all_statuses|length %}
             (po filtrowaniu)
           {% endif %}
         {% else %}
@@ -148,8 +133,7 @@
         <thead class="table-light">
           <tr>
             <th scope="col">
-              <a href="{{ url_for('list_opinions') }}?{% if current_filters.k1 %}k1=true&{% endif %}{% if current_filters.k2 %}k2=true&{% endif %}{% if current_filters.k3 %}k3=true&{% endif %}{% if current_filters.k4 %}k4=true&{% endif %}{% if current_filters.search %}search={{ current_filters.search|urlencode }}&{% endif %}{% if current_filters.search_content %}search_content=true&{% endif %}{% if current_filters.fuzzy_search %}fuzzy_search=true&{% endif %}sort_by=sygnatura&sort_order={% if current_filters.sort_by == 'sygnatura' and current_filters.sort_order == 'asc' %}desc{% else %}asc{% endif %}" 
-                 class="text-decoration-none text-dark d-flex align-items-center">
+              <a href="{{ sort_url('sygnatura') }}" class="text-decoration-none text-dark d-flex align-items-center">
                 Dotyczy
                 {% if current_filters.sort_by == 'sygnatura' %}
                   {% if current_filters.sort_order == 'asc' %}
@@ -163,8 +147,7 @@
               </a>
             </th>
             <th scope="col">
-              <a href="{{ url_for('list_opinions') }}?{% if current_filters.k1 %}k1=true&{% endif %}{% if current_filters.k2 %}k2=true&{% endif %}{% if current_filters.k3 %}k3=true&{% endif %}{% if current_filters.k4 %}k4=true&{% endif %}{% if current_filters.search %}search={{ current_filters.search|urlencode }}&{% endif %}{% if current_filters.search_content %}search_content=true&{% endif %}{% if current_filters.fuzzy_search %}fuzzy_search=true&{% endif %}sort_by=filename&sort_order={% if current_filters.sort_by == 'filename' and current_filters.sort_order == 'asc' %}desc{% else %}asc{% endif %}" 
-                 class="text-decoration-none text-dark d-flex align-items-center">
+              <a href="{{ sort_url('filename') }}" class="text-decoration-none text-dark d-flex align-items-center">
                 Nazwa pliku
                 {% if current_filters.sort_by == 'filename' %}
                   {% if current_filters.sort_order == 'asc' %}
@@ -179,8 +162,7 @@
             </th>
             <th scope="col">Notatka</th>
             <th scope="col" class="text-center">
-              <a href="{{ url_for('list_opinions') }}?{% if current_filters.k1 %}k1=true&{% endif %}{% if current_filters.k2 %}k2=true&{% endif %}{% if current_filters.k3 %}k3=true&{% endif %}{% if current_filters.k4 %}k4=true&{% endif %}{% if current_filters.search %}search={{ current_filters.search|urlencode }}&{% endif %}{% if current_filters.search_content %}search_content=true&{% endif %}{% if current_filters.fuzzy_search %}fuzzy_search=true&{% endif %}sort_by=status&sort_order={% if current_filters.sort_by == 'status' and current_filters.sort_order == 'asc' %}desc{% else %}asc{% endif %}" 
-                 class="text-decoration-none text-dark d-flex align-items-center justify-content-center">
+              <a href="{{ sort_url('status') }}" class="text-decoration-none text-dark d-flex align-items-center justify-content-center">
                 Status
                 {% if current_filters.sort_by == 'status' %}
                   {% if current_filters.sort_order == 'asc' %}
@@ -194,8 +176,7 @@
               </a>
             </th>
             <th scope="col">
-              <a href="{{ url_for('list_opinions') }}?{% if current_filters.k1 %}k1=true&{% endif %}{% if current_filters.k2 %}k2=true&{% endif %}{% if current_filters.k3 %}k3=true&{% endif %}{% if current_filters.k4 %}k4=true&{% endif %}{% if current_filters.search %}search={{ current_filters.search|urlencode }}&{% endif %}{% if current_filters.search_content %}search_content=true&{% endif %}{% if current_filters.fuzzy_search %}fuzzy_search=true&{% endif %}sort_by=last_modified&sort_order={% if current_filters.sort_by == 'last_modified' and current_filters.sort_order == 'asc' %}desc{% else %}asc{% endif %}" 
-                 class="text-decoration-none text-dark d-flex align-items-center">
+              <a href="{{ sort_url('last_modified') }}" class="text-decoration-none text-dark d-flex align-items-center">
                 Ostatnia zmiana
                 {% if current_filters.sort_by == 'last_modified' %}
                   {% if current_filters.sort_order == 'asc' %}
@@ -246,23 +227,11 @@
               {% endif %}
             </td>
             <td class="text-center">
-              {% if opinion.step == 'k1' %}
-                <span class="badge bg-danger p-2">
-                  <i class="bi bi-pencil-fill me-1"></i>{{ opinion.step }}
-                </span>
-              {% elif opinion.step == 'k2' %}
-                <span class="badge bg-warning p-2">
-                  <i class="bi bi-journals me-1"></i>{{ opinion.step }}
-                </span>
-              {% elif opinion.step == 'k3' %}
-                <span class="badge bg-success p-2">
-                  <i class="bi bi-check-circle-fill me-1"></i>{{ opinion.step }}
-                </span>
-              {% else %}
-                <span class="badge bg-secondary p-2">
-                  <i class="bi bi-archive-fill me-1"></i>{{ opinion.step }}
-                </span>
-              {% endif %}
+              {% set status_color = status_colors.get(opinion.step, 'secondary') %}
+              {% set status_icon = status_icons.get(opinion.step, 'question-circle') %}
+              <span class="badge bg-{{ status_color }} p-2">
+                <i class="bi bi-{{ status_icon }} me-1"></i>{{ opinion.step }}
+              </span>
             </td>
             <td>{{ opinion.last_modified.strftime('%Y-%m-%d %H:%M') if opinion.last_modified else '-' }}</td>
             <td class="text-center" onclick="event.stopPropagation();">
@@ -289,7 +258,7 @@
     {% if opinions|length == 0 %}
     <div class="text-center py-5">
       <i class="bi bi-file-earmark-text" style="font-size: 3rem; color: #6c757d;"></i>
-      {% if current_filters.search or not (current_filters.k1 and current_filters.k2 and current_filters.k3 and current_filters.k4) %}
+      {% if current_filters.search or current_filters.active_statuses|length < all_statuses|length %}
         <p class="mt-3 text-muted">Nie znaleziono opinii spełniających kryteria filtrowania.</p>
         <p>Spróbuj zmienić filtry lub zresetować wyszukiwanie.</p>
       {% else %}

@@ -179,7 +179,7 @@ class DocumentManager:
             if doc.ocr_status == "done":
                 ocr_txt_query = select(Document).where(
                     Document.ocr_parent_id == doc_id,
-                    Document.doc_type == "OCR TXT"
+                    Document.doc_type == "ocr_txt"
                 ).order_by(Document.upload_time.desc())  # ✅ SORTUJ PO DACIE, NAJNOWSZY PIERWSZY
                 ocr_txt = session.exec(ocr_txt_query).first()  # Teraz .first() bierze najnowszy
 
@@ -476,7 +476,7 @@ class DocumentManager:
             # Sprawdź czy już istnieje dokument OCR TXT dla tego dokumentu
             ocr_txt_query = select(Document).where(
                 Document.ocr_parent_id == doc_id,
-                Document.doc_type == "OCR TXT"
+                Document.doc_type == "ocr_txt"
             )
             ocr_txt_doc = session.exec(ocr_txt_query).first()
 
@@ -514,7 +514,7 @@ class DocumentManager:
                     # Utwórz wpis w bazie danych
                     new_ocr_doc = Document(
                         sygnatura=source_doc.sygnatura,
-                        doc_type="OCR TXT",
+                        doc_type="ocr_txt",
                         original_filename=f"{Path(source_doc.original_filename).stem}_manual_ocr.txt",
                         stored_filename=txt_stored,
                         step=source_doc.step,

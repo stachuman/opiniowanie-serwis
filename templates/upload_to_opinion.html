@@ -30,12 +30,11 @@
         <label for="doc_type" class="form-label">Rodzaj dokumentu</label>
         <select name="doc_type" id="doc_type" class="form-select" required>
           <option value="">-- Wybierz rodzaj dokumentu --</option>
-          <option value="Akta">Akta sprawy</option>
-          <option value="Dokumentacja medyczna">Dokumentacja medyczna</option>
-          <option value="Opinia">Opinia specjalistyczna</option>
-          <option value="Zaświadczenie">Zaświadczenie</option>
-          <option value="Wniosek">Wniosek</option>
-          <option value="Inne">Inne</option>
+          {% for doc_type in document_types %}
+            <option value="{{ doc_type.code }}">
+              <i class="bi bi-{{ doc_type.icon }}"></i> {{ doc_type.name }}
+            </option>
+          {% endfor %}
         </select>
       </div>
 

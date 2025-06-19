@@ -16,6 +16,9 @@ from app.document_utils import STEP_ICON
 from app.text_extraction import HAS_DOCX
 from app.llm_service import llm_service, get_default_instruction, combine_note_with_summary
 
+# Import konfiguracji typów dokumentów
+from app.config.document_types import document_type_config
+
 # Import managera z tasks
 from tasks.document_manager import document_manager
 
@@ -34,7 +37,7 @@ def document_summarize_form(request: Request, doc_id: int):
         from sqlmodel import select
         ocr_txt_query = select(Document).where(
             Document.ocr_parent_id == doc_id,
-            Document.doc_type == "OCR TXT"
+            Document.doc_type == "ocr_txt"
         )
         ocr_txt = session.exec(ocr_txt_query).first()
 
@@ -339,6 +342,9 @@ def document_detail(request: Request, doc_id: int):
              ("k2", "k2 – Komplet dokumentów"),
              ("k3", "k3 – Word z wyciągiem wysłany"),
              ("k4", "k4 – Archiwum")]
+    
+    # Pobierz typy dokumentów z konfiguracji
+    document_types = document_type_config.get_all_types()
 
     # Kontekst odpowiedzi
     context = {
@@ -346,6 +352,7 @@ def document_detail(request: Request, doc_id: int):
         "doc": result.document,
         "ocr_txt": result.ocr_txt_document,
         "steps": steps,
+        "document_types": document_types,
         "title": navigation['page_title'],
         "current_year": datetime.now().year,
         "page_type": "document_detail",
@@ -456,7 +463,7 @@ def documents_export_csv(request: Request,
             doc_type_icon = "PDF"
         elif doc.mime_type and 'word' in doc.mime_type:
             doc_type_icon = "Word"
-        elif doc.doc_type == 'OCR TXT':
+        elif doc.doc_type == 'ocr_txt':
             doc_type_icon = "Wynik OCR"
         else:
             doc_type_icon = "Dokument"

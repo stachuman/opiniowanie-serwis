@@ -330,7 +330,7 @@ def save_ocr_results(doc_id: int, text_content: str, confidence: float,
         # Pobierz stare dokumenty OCR
         cursor.execute("""
             SELECT id, stored_filename FROM document 
-            WHERE ocr_parent_id = ? AND doc_type = 'OCR TXT'
+            WHERE ocr_parent_id = ? AND doc_type = 'ocr_txt'
         """, (doc_id,))
         old_ocr_docs = cursor.fetchall()
 
@@ -347,7 +347,7 @@ def save_ocr_results(doc_id: int, text_content: str, confidence: float,
         # Usuń stare rekordy z bazy
         cursor.execute("""
             DELETE FROM document 
-            WHERE ocr_parent_id = ? AND doc_type = 'OCR TXT'
+            WHERE ocr_parent_id = ? AND doc_type = 'ocr_txt'
         """, (doc_id,))
 
         if old_ocr_docs:
@@ -365,7 +365,7 @@ def save_ocr_results(doc_id: int, text_content: str, confidence: float,
                 last_modified
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            sygnatura, "OCR TXT", txt_original_name, txt_filename,
+            sygnatura, "ocr_txt", txt_original_name, txt_filename,
             step, "done", doc_id, confidence,
             "text/plain", "document", now_iso, 0, now_iso
         ))
