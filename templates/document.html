@@ -216,15 +216,15 @@
               <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('document_download', doc_id=ocr_txt.id) }}">
                 <i class="bi bi-file-earmark-text"></i> Pobierz tekst
               </a>
-              <button class="btn btn-sm btn-outline-primary run-ocr-btn" data-doc-id="{{ doc.id }}">
+              <button type="button" class="btn btn-sm btn-outline-primary run-ocr-btn" data-doc-id="{{ doc.id }}">
                 <i class="bi bi-arrow-clockwise"></i> Wykonaj OCR ponownie
               </button>
             {% elif doc.ocr_status == 'fail' %}
-              <button class="btn btn-sm btn-outline-danger run-ocr-btn" data-doc-id="{{ doc.id }}">
+              <button type="button" class="btn btn-sm btn-outline-danger run-ocr-btn" data-doc-id="{{ doc.id }}">
                 <i class="bi bi-arrow-clockwise"></i> Spróbuj ponownie OCR
               </button>
             {% elif doc.ocr_status == 'none' %}
-              <button class="btn btn-sm btn-outline-primary run-ocr-btn" data-doc-id="{{ doc.id }}">
+              <button type="button" class="btn btn-sm btn-outline-primary run-ocr-btn" data-doc-id="{{ doc.id }}">
                 <i class="bi bi-play"></i> Uruchom OCR
               </button>
             {% endif %}

@@ -4,7 +4,8 @@
       "Bash(find:*)",
       "Bash(grep:*)",
       "Bash(conda activate:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(rg:*)"
     ],
     "deny": []
   }

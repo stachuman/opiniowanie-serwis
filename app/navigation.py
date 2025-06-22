@@ -297,11 +297,7 @@ def build_document_navigation(request: Request, document: Document,
                                   str(request.url_for('document_download', doc_id=document.id)),
                                   "download")
 
-    # OCR actions
-    if document.ocr_status != 'done':
-        actions_builder.add_primary("Uruchom OCR",
-                                    str(request.url_for('document_run_ocr', doc_id=document.id)),
-                                    "gear")
+    # OCR actions removed - handled in template with JavaScript
 
     # Update actions
     if document.mime_type and 'word' in document.mime_type:
@@ -758,12 +754,8 @@ def build_document_navigation(request: Request, document: Document,
                                   str(request.url_for('document_download', doc_id=document.id)),
                                   "download")
 
-    # Akcje OCR w zależności od statusu
-    if document.ocr_status == 'none' and document.mime_type != 'text/plain':
-        actions_builder.add_primary("Uruchom OCR",
-                                    str(request.url_for('document_run_ocr', doc_id=document.id)),
-                                    "play")
-    elif document.ocr_status == 'done':
+    # Akcje OCR w zależności od statusu - removed, handled in template with JavaScript
+    if document.ocr_status == 'done':
         # Dodaj link do podsumowania AI jeśli OCR jest gotowy
         actions_builder.add_secondary("Podsumowanie AI",
                                       str(request.url_for('document_summarize_form', doc_id=document.id)),

@@ -68,6 +68,7 @@ class OpinionDetailManager {
    */
   async handleRunOcr(e, button) {
     e.preventDefault();
+    console.log('OpinionDetailManager: handleRunOcr called');
 
     const docId = button.getAttribute('data-doc-id');
 
@@ -85,6 +86,7 @@ class OpinionDetailManager {
         }
       });
 
+      // Endpoint zwraca redirect, fetch automatycznie go obsłuży
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -547,7 +549,11 @@ Skup się na aspektach merytorycznych i prawnych.`
 
 // Inicjalizacja po załadowaniu DOM
 document.addEventListener('DOMContentLoaded', function() {
-  window.opinionDetailManager = new OpinionDetailManager();
+  // Inicjalizuj tylko na stronach opinii, nie na stronach dokumentów
+  if (document.querySelector('[data-page-type="opinion_detail"]') || 
+      (window.location.pathname.includes('/opinion/') && !window.location.pathname.includes('/document/'))) {
+    window.opinionDetailManager = new OpinionDetailManager();
+  }
 });
 
 // Export globalny

@@ -8,7 +8,7 @@ from pathlib import Path
 # Stałe dla modelu OCR
 DEFAULT_OCR_INSTRUCTION = "Read all text in the image. Extract all visible text including headers, footers, paragraphs, lists, and tables. Preserve original formatting as much as possible. Output to be a plain text. Ignore watermarks. Text is in Polish."
 OCR_MODEL_PATH = "Qwen/Qwen2.5-VL-7B-Instruct"
-#OCR_MODEL_PATH = "Qwen/Qwen2.5-VL-72B-Instruct"
+#OCR_MODEL_PATH = "nanonets/Nanonets-OCR-s"
 MAX_NEW_TOKENS = 8000
 
 # Konfiguracja logowania

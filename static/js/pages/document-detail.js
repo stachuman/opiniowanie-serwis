@@ -46,6 +46,9 @@ class DocumentDetailManager {
     // Przyciski uruchamiania OCR
     const runOcrBtn = e.target.closest('.run-ocr-btn');
     if (runOcrBtn) {
+      console.log('DocumentDetailManager: run-ocr-btn clicked', runOcrBtn);
+      e.preventDefault(); // DODANE: Zapobiegaj domyślnej akcji
+      e.stopPropagation(); // DODANE: Zatrzymaj propagację
       this.handleRunOcr(e, runOcrBtn);
       return;
     }
@@ -63,6 +66,7 @@ class DocumentDetailManager {
    */
   async handleRunOcr(e, button) {
     e.preventDefault();
+    console.log('DocumentDetailManager: handleRunOcr called');
 
     const docId = button.getAttribute('data-doc-id') || this.docId;
 
@@ -80,6 +84,7 @@ class DocumentDetailManager {
         }
       });
 
+      // Endpoint zwraca redirect, fetch automatycznie go obsłuży
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -421,6 +426,36 @@ class DocumentDetailManager {
     };
   }
 }
+
+// Inicjalizacja po załadowaniu DOM
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('DocumentDetailManager: DOM loaded, checking conditions...');
+  console.log('Page type:', document.body.getAttribute('data-page-type'));
+  console.log('URL pathname:', window.location.pathname);
+  
+  // Inicjalizuj tylko na stronach dokumentów
+  if (document.querySelector('[data-page-type="document_detail"]') || 
+      window.location.pathname.includes('/document/')) {
+    
+    console.log('DocumentDetailManager: Initializing...');
+    
+    // Pobierz docId z URL
+    const pathParts = window.location.pathname.split('/');
+    const docIdIndex = pathParts.indexOf('document') + 1;
+    const docId = docIdIndex < pathParts.length ? parseInt(pathParts[docIdIndex]) : null;
+    
+    console.log('DocumentDetailManager: docId from URL:', docId);
+    
+    if (docId) {
+      window.documentDetailManager = new DocumentDetailManager(docId);
+      console.log('DocumentDetailManager: Initialized successfully');
+    } else {
+      console.warn('DocumentDetailManager: No docId found in URL');
+    }
+  } else {
+    console.log('DocumentDetailManager: Not a document page, skipping initialization');
+  }
+});
 
 // Export globalny
 window.DocumentDetailManager = DocumentDetailManager;
