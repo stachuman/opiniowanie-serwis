@@ -84,7 +84,7 @@ class DocumentTypeConfig:
             description="Wynik rozpoznawania tekstu OCR",
             color="secondary",
             icon="file-earmark-text",
-            default_visible=False,  # Ukryte domyślnie
+            default_visible=True,  # Ukryte domyślnie
             sort_order=10
         ),
         DocumentType(

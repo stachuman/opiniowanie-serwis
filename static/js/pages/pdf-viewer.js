@@ -245,47 +245,36 @@ scrollToPageInText(pageNumber) {
   }
 
   /**
-   * Dodaje kontrolki zoom do toolbara
+   * Dodaje kontrolki zoom do toolbara - WYŁĄCZONE
    */
   addZoomControls() {
-    const pageInfo = this.elements.pageInfo;
-    if (!pageInfo) return;
-
-    // Sprawdź czy kontrolki już istnieją
-    if (document.getElementById('pdfZoomControls')) return;
-
-    const zoomControls = document.createElement('div');
-    zoomControls.id = 'pdfZoomControls';
-    zoomControls.className = 'btn-group ms-2';
-    zoomControls.innerHTML = `
-      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="pdfViewerManager.zoomOut()" title="Pomniejsz (Ctrl+-)">
-        <i class="bi bi-zoom-out"></i>
-      </button>
-      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="pdfViewerManager.resetZoom()" title="Resetuj zoom (Ctrl+0)">
-        <span id="zoomLevel">150%</span>
-      </button>
-      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="pdfViewerManager.zoomIn()" title="Powiększ (Ctrl++)">
-        <i class="bi bi-zoom-in"></i>
-      </button>
-    `;
-
-    pageInfo.parentNode.appendChild(zoomControls);
+    // Funkcja zoom wyłączona - przyciski nie działają prawidłowo
+    return;
   }
 
   /**
    * Konfiguruje funkcję skoku do strony
    */
   setupPageJump() {
-    const pageInfo = this.elements.pageInfo;
-    if (!pageInfo) return;
+    const pageJumpBtn = document.getElementById('pageJumpBtn');
+    const pageJumpInput = document.getElementById('pageJumpInput');
+    
+    if (!pageJumpBtn || !pageJumpInput) return;
 
-    // Dodaj event listener do kliknięcia na informację o stronie
-    pageInfo.addEventListener('click', () => {
-      this.showPageJumpDialog();
+    // Event listener dla przycisku "Idź"
+    pageJumpBtn.addEventListener('click', () => {
+      this.handlePageJump();
     });
 
-    pageInfo.style.cursor = 'pointer';
-    pageInfo.title = 'Kliknij aby przejść do konkretnej strony';
+    // Event listener dla Enter w polu tekstowym
+    pageJumpInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        this.handlePageJump();
+      }
+    });
+
+    // Aktualizuj maksymalną wartość pola gdy się zmieni liczba stron
+    this.updatePageJumpMaxValue();
   }
 
 
@@ -410,27 +399,41 @@ scrollToPageInText(pageNumber) {
   // === NAVIGATION FUNCTIONS ===
 
   /**
-   * Pokazuje dialog skoku do strony
+   * Obsługuje skok do strony z pola tekstowego
    */
-  showPageJumpDialog() {
+  handlePageJump() {
     if (!window.ocrViewer) return;
 
-    const currentPage = window.ocrViewer.state.currentPage;
+    const pageJumpInput = document.getElementById('pageJumpInput');
+    if (!pageJumpInput) return;
+
+    const pageNumber = pageJumpInput.value.trim();
+    if (!pageNumber) return;
+
+    const targetPage = parseInt(pageNumber);
     const totalPages = window.ocrViewer.state.totalPages;
 
-    const pageNumber = prompt(
-      `Przejdź do strony (1-${totalPages}):`,
-      currentPage.toString()
-    );
+    if (isNaN(targetPage) || targetPage < 1 || targetPage > totalPages) {
+      window.alertManager.error(`Numer strony musi być między 1 a ${totalPages}`);
+      pageJumpInput.focus();
+      return;
+    }
 
-    if (pageNumber !== null) {
-      const targetPage = parseInt(pageNumber);
+    window.ocrViewer.renderPage(targetPage);
+    pageJumpInput.value = ''; // Wyczyść pole po udanym skoku
+  }
 
-      if (targetPage >= 1 && targetPage <= totalPages) {
-        window.ocrViewer.renderPage(targetPage);
-      } else {
-        window.alertManager.error(`Numer strony musi być między 1 a ${totalPages}`);
-      }
+  /**
+   * Aktualizuje maksymalną wartość dla pola skoku do strony
+   */
+  updatePageJumpMaxValue() {
+    const pageJumpInput = document.getElementById('pageJumpInput');
+    if (!pageJumpInput || !window.ocrViewer) return;
+
+    const totalPages = window.ocrViewer.state.totalPages;
+    if (totalPages) {
+      pageJumpInput.setAttribute('max', totalPages.toString());
+      pageJumpInput.setAttribute('placeholder', `Nr strony (1-${totalPages})`);
     }
   }
 
@@ -578,6 +581,9 @@ scrollToPageInText(pageNumber) {
   goToPage(pageNumber) {
     if (window.ocrViewer) {
         window.ocrViewer.renderPage(pageNumber);
+
+        // Aktualizuj pole skoku do strony
+        this.updatePageJumpMaxValue();
 
         // NOWE: Synchronizuj tekst po zmianie strony
         setTimeout(() => {
