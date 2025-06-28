@@ -69,6 +69,16 @@ class CaseStatusConfig:
             default_visible=False,
             sort_order=5
         ),
+
+        CaseStatus(
+            code="k4.1",
+            name="k4.1 – Do wyjaśnienia",
+            description="Do wyjaśnienia, czy robić",
+            color="secondary", 
+            icon="archive-fill",
+            default_visible=False,  # Domyślnie ukryte
+            sort_order=7
+        ),
         CaseStatus(
             code="k4",
             name="k4 – Archiwum",
@@ -76,7 +86,7 @@ class CaseStatusConfig:
             color="secondary", 
             icon="archive-fill",
             default_visible=False,  # Domyślnie ukryte
-            sort_order=6
+            sort_order=8
         )
     ]
     
