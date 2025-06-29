@@ -113,6 +113,20 @@
     <div class="d-flex justify-content-between align-items-center">
       <h5 class="card-title mb-0">
         <i class="bi bi-files me-2"></i>Wykaz opinii
+        {# NOWE: Przełącznik trybu wyświetlania #}
+        {% if current_filters.search %}
+          <div class="btn-group btn-group-sm ms-3" role="group">
+            <input type="radio" class="btn-check" name="viewMode" id="viewNormal" value="normal">
+            <label class="btn btn-outline-secondary" for="viewNormal">
+              <i class="bi bi-list me-1"></i>Lista
+            </label>
+            <input type="radio" class="btn-check" name="viewMode" id="viewContext" value="context" 
+                   {% if search_settings.show_context_by_default %}checked{% endif %}>
+            <label class="btn btn-outline-primary" for="viewContext">
+              <i class="bi bi-search me-1"></i>Z kontekstem
+            </label>
+          </div>
+        {% endif %}
       </h5>
       <span class="badge bg-primary">
         {% if total_count %}
@@ -201,8 +215,67 @@
               {% else %}
                 <span class="text-muted">Brak informacji, kogo dotyczy</span>
               {% endif %}
+              
+              {# NOWE: Wyświetlanie dopasowań wyszukiwania #}
+              {% if search_matches and opinion.id in search_matches %}
+                <div class="mt-1">
+                  <small class="text-muted">
+                    <i class="bi bi-search text-primary me-1"></i>
+                    Dopasowania:
+                    {% for match_type in search_matches[opinion.id] %}
+                      {% if match_type == 'metadata' %}
+                        <span class="badge bg-info me-1">metadane</span>
+                      {% elif match_type == 'content' %}
+                        <span class="badge bg-success me-1">treść</span>
+                      {% elif match_type == 'child_content' %}
+                        <span class="badge bg-warning me-1">załącznik</span>
+                      {% elif match_type.startswith('fuzzy_') %}
+                        <span class="badge bg-secondary me-1">{{ match_type.replace('fuzzy_', '') }} (~)</span>
+                      {% endif %}
+                    {% endfor %}
+                  </small>
+                </div>
+              {% endif %}
             </td>
-            <td>{{ opinion.original_filename }}</td>
+            <td>
+              <div>{{ opinion.original_filename }}</div>
+              
+              {# NOWE: Kontekst wyszukiwania #}
+              {% if search_contexts and opinion.id in search_contexts and search_settings.show_context_by_default %}
+                <div class="search-context mt-2">
+                  {% for snippet in search_contexts[opinion.id][:3] %}
+                    <div class="context-snippet mb-2 p-2 bg-light rounded">
+                      <div class="d-flex justify-content-between align-items-start mb-1">
+                        <small class="text-muted fw-bold">
+                          {% if snippet.match_type == 'metadata' %}
+                            <i class="bi bi-tag text-info me-1"></i>{{ snippet.source_info }}
+                          {% elif snippet.match_type == 'content' %}
+                            <i class="bi bi-file-text text-success me-1"></i>{{ snippet.source_info }}
+                          {% elif snippet.match_type == 'attachment' %}
+                            <i class="bi bi-paperclip text-warning me-1"></i>{{ snippet.source_info }}
+                          {% endif %}
+                        </small>
+                        {% if snippet.confidence < 1.0 %}
+                          <small class="badge bg-secondary">{{ (snippet.confidence * 100)|round }}%</small>
+                        {% endif %}
+                      </div>
+                      <div class="context-text small">
+                        {{ snippet.highlighted_text|safe }}
+                      </div>
+                    </div>
+                  {% endfor %}
+                  
+                  {% if search_contexts[opinion.id]|length > 3 %}
+                    <button class="btn btn-sm btn-outline-secondary show-more-context" 
+                            data-doc-id="{{ opinion.id }}"
+                            data-total="{{ search_total_contexts[opinion.id] if search_total_contexts and opinion.id in search_total_contexts else search_contexts[opinion.id]|length }}">
+                      <i class="bi bi-chevron-down me-1"></i>
+                      Pokaż więcej ({{ (search_total_contexts[opinion.id] if search_total_contexts and opinion.id in search_total_contexts else search_contexts[opinion.id]|length) - 3 }})
+                    </button>
+                  {% endif %}
+                </div>
+              {% endif %}
+            </td>
             <td>
               {% if opinion.note %}
                 <div class="d-flex align-items-center">
@@ -234,7 +307,7 @@
               </span>
             </td>
             <td>{{ opinion.last_modified.strftime('%Y-%m-%d %H:%M') if opinion.last_modified else '-' }}</td>
-            <td class="text-center" onclick="event.stopPropagation();">
+            <td class="text-center" data-no-navigate="true">
               <div class="btn-group">
                 <a href="{{ url_for('document_download', doc_id=opinion.id) }}"
                    class="btn btn-sm btn-outline-primary"
@@ -320,4 +393,89 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+/* Search loader animations */
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes fadeInOverlay {
+  from { 
+    opacity: 0; 
+    backdrop-filter: blur(0px);
+  }
+  to { 
+    opacity: 1; 
+    backdrop-filter: blur(2px);
+  }
+}
+
+#searchLoader {
+  animation: fadeInOverlay 0.3s ease-in-out;
+}
+
+#searchLoader .spinner-border {
+  animation: spin 1s linear infinite;
+}
+
+#searchLoader h4 {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Responsive adjustments for search loader */
+@media (max-width: 768px) {
+  #searchLoader h4 {
+    font-size: 1.2rem;
+  }
+  
+  #searchLoader .progress {
+    width: 250px !important;
+  }
+  
+  #searchLoader .spinner-border {
+    width: 2rem !important;
+    height: 2rem !important;
+  }
+}
+
+/* Context snippet hover effects */
+.context-snippet {
+  transition: all 0.2s ease;
+}
+
+.context-snippet:hover {
+  background-color: #f8f9fa !important;
+  border-left: 3px solid #0d6efd;
+}
+
+/* New context snippet highlighting */
+.new-context-snippet {
+  animation: slideInFade 0.5s ease-out;
+  border-left: 3px solid #198754 !important;
+}
+
+@keyframes slideInFade {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Search highlighting improvements */
+.search-highlight {
+  background-color: #fff3cd;
+  padding: 1px 2px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+</style>
 {% endblock %}

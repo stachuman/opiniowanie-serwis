@@ -19,7 +19,69 @@ class OpinionDetailManager {
     this.setupEventListeners();
     this.setupFormHandlers();
     this.setupModalHandlers();
+    this.setupAutoRefresh();
     console.log('OpinionDetailManager zainicjalizowany');
+  }
+
+  /**
+   * Konfiguruje automatyczne odświeżanie dla aktywnych procesów OCR
+   */
+  setupAutoRefresh() {
+    // Sprawdź czy są dokumenty z OCR w toku
+    const runningOcrElements = document.querySelectorAll('[data-ocr-status="running"]');
+    const pendingOcrElements = document.querySelectorAll('[data-ocr-status="pending"]');
+    
+    if (runningOcrElements.length > 0 || pendingOcrElements.length > 0) {
+      console.log(`Auto-refresh włączony: ${runningOcrElements.length} running, ${pendingOcrElements.length} pending OCR`);
+      
+      // Odśwież stronę po 10 sekundach
+      setTimeout(() => {
+        location.reload();
+      }, 10000);
+      
+      // Pokaż indicator aktywnych procesów
+      this.showActiveOcrIndicator(runningOcrElements.length, pendingOcrElements.length);
+    }
+  }
+
+  /**
+   * Pokazuje wskaźnik aktywnych procesów OCR
+   */
+  showActiveOcrIndicator(runningCount, pendingCount) {
+    // Sprawdź czy już istnieje
+    if (document.getElementById('activeOcrIndicator')) return;
+    
+    const indicator = document.createElement('div');
+    indicator.id = 'activeOcrIndicator';
+    indicator.className = 'alert alert-info d-flex align-items-center position-fixed';
+    indicator.style.cssText = `
+      top: 20px;
+      right: 20px;
+      z-index: 1050;
+      min-width: 300px;
+      box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+      animation: fadeInSlide 0.5s ease-out;
+    `;
+    
+    indicator.innerHTML = `
+      <div class="spinner-border spinner-border-sm text-info me-2" role="status">
+        <span class="visually-hidden">Przetwarzanie...</span>
+      </div>
+      <div class="flex-grow-1">
+        <strong>Aktywne procesy OCR</strong><br>
+        <small>W toku: ${runningCount}, Oczekuje: ${pendingCount}</small>
+      </div>
+      <button type="button" class="btn-close btn-close-white ms-2" data-dismiss-indicator="true"></button>
+    `;
+    
+    document.body.appendChild(indicator);
+    
+    // Auto-usuń po 8 sekundach
+    setTimeout(() => {
+      if (indicator.parentElement) {
+        indicator.remove();
+      }
+    }, 8000);
   }
 
   /**
@@ -59,6 +121,63 @@ class OpinionDetailManager {
     const runOcrBtn = e.target.closest('.run-ocr-btn');
     if (runOcrBtn) {
       this.handleRunOcr(e, runOcrBtn);
+      return;
+    }
+
+    // Instrukcje AI
+    const loadDefaultBtn = e.target.closest('.load-default-instruction');
+    if (loadDefaultBtn) {
+      e.preventDefault();
+      this.loadQuickDefaultInstruction();
+      return;
+    }
+
+    const loadMedicalBtn = e.target.closest('.load-medical-instruction');
+    if (loadMedicalBtn) {
+      e.preventDefault();
+      this.loadMedicalInstruction();
+      return;
+    }
+
+    const loadLegalBtn = e.target.closest('.load-legal-instruction');
+    if (loadLegalBtn) {
+      e.preventDefault();
+      this.loadLegalInstruction();
+      return;
+    }
+
+    // Generowanie podsumowań
+    const generateBtn = e.target.closest('.generate-quick-summary');
+    if (generateBtn) {
+      e.preventDefault();
+      this.generateQuickSummary();
+      return;
+    }
+
+    // Kopiowanie do schowka
+    const copyBtn = e.target.closest('.copy-summary-clipboard');
+    if (copyBtn) {
+      e.preventDefault();
+      this.copySummaryToClipboard();
+      return;
+    }
+
+    // Generuj ponownie
+    const generateAnotherBtn = e.target.closest('.generate-another-quick');
+    if (generateAnotherBtn) {
+      e.preventDefault();
+      this.generateAnotherQuick();
+      return;
+    }
+
+    // Zamknij wskaźnik OCR
+    const dismissBtn = e.target.closest('[data-dismiss-indicator]');
+    if (dismissBtn) {
+      e.preventDefault();
+      const indicator = dismissBtn.closest('#activeOcrIndicator');
+      if (indicator) {
+        indicator.remove();
+      }
       return;
     }
   }
@@ -213,17 +332,17 @@ class OpinionDetailManager {
 
         <div class="d-flex justify-content-between">
           <div>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="opinionDetailManager.loadQuickDefaultInstruction()">
+            <button type="button" class="btn btn-sm btn-outline-secondary load-default-instruction">
               <i class="bi bi-arrow-clockwise"></i> Domyślna instrukcja
             </button>
-            <button type="button" class="btn btn-sm btn-outline-info" onclick="opinionDetailManager.loadMedicalInstruction()">
+            <button type="button" class="btn btn-sm btn-outline-info load-medical-instruction">
               <i class="bi bi-heart-pulse"></i> Instrukcja medyczna
             </button>
-            <button type="button" class="btn btn-sm btn-outline-warning" onclick="opinionDetailManager.loadLegalInstruction()">
+            <button type="button" class="btn btn-sm btn-outline-warning load-legal-instruction">
               <i class="bi bi-scales"></i> Instrukcja prawna
             </button>
           </div>
-          <button type="button" class="btn btn-primary" onclick="opinionDetailManager.generateQuickSummary()">
+          <button type="button" class="btn btn-primary generate-quick-summary">
             <i class="bi bi-magic"></i> Generuj podsumowanie
           </button>
         </div>
@@ -249,10 +368,10 @@ class OpinionDetailManager {
           <div id="summaryResultContent"></div>
         </div>
         <div class="d-flex justify-content-end gap-2">
-          <button type="button" class="btn btn-outline-secondary" onclick="opinionDetailManager.copySummaryToClipboard()">
+          <button type="button" class="btn btn-outline-secondary copy-summary-clipboard">
             <i class="bi bi-clipboard"></i> Kopiuj
           </button>
-          <button type="button" class="btn btn-outline-primary" onclick="opinionDetailManager.generateAnotherQuick()">
+          <button type="button" class="btn btn-outline-primary generate-another-quick">
             <i class="bi bi-arrow-repeat"></i> Generuj ponownie
           </button>
           <a href="/document/${this.currentSummaryDocId}/summarize" class="btn btn-outline-info" target="_blank">
@@ -266,7 +385,7 @@ class OpinionDetailManager {
         <div class="alert alert-danger">
           <div id="summaryErrorContent"></div>
         </div>
-        <button type="button" class="btn btn-outline-danger" onclick="opinionDetailManager.generateQuickSummary()">
+        <button type="button" class="btn btn-outline-danger generate-quick-summary">
           <i class="bi bi-arrow-repeat"></i> Spróbuj ponownie
         </button>
       </div>

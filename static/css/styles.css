@@ -39,3 +39,164 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
   background-color: white;
 }
+
+/* Style dla wyników wyszukiwania z kontekstem */
+.search-context {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background-color: #f8f9fa;
+  border-left: 3px solid #0d6efd;
+  border-radius: 0.25rem;
+}
+
+.context-snippet {
+  background-color: #ffffff;
+  border: 1px solid #e9ecef;
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  transition: all 0.15s ease-in-out;
+}
+
+.context-snippet:hover {
+  background-color: #f8f9fa;
+  border-color: #adb5bd;
+}
+
+.context-text {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  line-height: 1.4;
+  color: #495057;
+}
+
+/* Podświetlenie wyników wyszukiwania */
+.search-highlight {
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 0.1em 0.2em;
+  border-radius: 0.25rem;
+  font-weight: 500;
+  border: 1px solid #ffeaa7;
+}
+
+/* Animacja dla search highlight */
+.search-highlight {
+  animation: highlightPulse 2s ease-in-out;
+}
+
+@keyframes highlightPulse {
+  0% {
+    background-color: #ffeaa7;
+    transform: scale(1);
+  }
+  50% {
+    background-color: #fff3cd;
+    transform: scale(1.05);
+  }
+  100% {
+    background-color: #fff3cd;
+    transform: scale(1);
+  }
+}
+
+/* Style dla badgeów typów dopasowań */
+.match-type-badge {
+  font-size: 0.75rem;
+  padding: 0.25em 0.5em;
+}
+
+/* Style dla przełącznika trybu wyświetlania */
+.view-mode-toggle .btn-check:checked + .btn {
+  background-color: #0d6efd;
+  border-color: #0d6efd;
+  color: white;
+}
+
+/* Style dla przycisków "Pokaż więcej" */
+.show-more-context {
+  font-size: 0.875rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  transition: all 0.15s ease-in-out;
+}
+
+.show-more-context:hover {
+  background-color: #6c757d;
+  border-color: #6c757d;
+  color: white;
+}
+
+/* Style dla wskaźników dopasowań */
+.search-match-indicators {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.search-match-indicators .badge {
+  font-size: 0.7rem;
+  padding: 0.2em 0.4em;
+}
+
+/* Style responsive dla urządzeń mobilnych */
+@media (max-width: 768px) {
+  .search-context {
+    margin-top: 0.25rem;
+    padding: 0.375rem;
+  }
+  
+  .context-snippet {
+    padding: 0.5rem;
+    margin-bottom: 0.375rem;
+  }
+  
+  .context-text {
+    font-size: 0.875rem;
+  }
+  
+  .view-mode-toggle {
+    margin-top: 0.5rem;
+  }
+}
+
+/* Style dla przypadku gdy brak wyników wyszukiwania */
+.no-search-results {
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+}
+
+.no-search-results .icon {
+  font-size: 3rem;
+  color: #adb5bd;
+  margin-bottom: 1rem;
+}
+
+/* Style dla ikon typów dopasowań */
+.match-type-icon {
+  font-size: 0.875rem;
+  margin-right: 0.25rem;
+}
+
+.match-type-icon.metadata {
+  color: #17a2b8;
+}
+
+.match-type-icon.content {
+  color: #28a745;
+}
+
+.match-type-icon.attachment {
+  color: #ffc107;
+}
+
+/* Ulepszenie czytelności tabeli z kontekstem */
+.table tbody tr:hover .search-context {
+  background-color: #e9ecef;
+}
+
+.table tbody tr:hover .context-snippet {
+  background-color: #f8f9fa;
+  border-color: #6c757d;
+}

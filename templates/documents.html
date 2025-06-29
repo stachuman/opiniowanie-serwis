@@ -291,22 +291,3 @@
 </div>
 {% endif %}
 {% endblock %}
-
-{% block scripts %}
-<script>
-// Inicjalizacja Opinion Detail Manager
-document.addEventListener('DOMContentLoaded', function() {
-  // OpinionDetailManager jest ładowany automatycznie przez base.html
-  // gdy page_type = 'opinion_detail'
-
-  console.log('Opinion Detail zainicjalizowana');
-
-  // Automatyczne odświeżanie dla aktywnych procesów OCR
-  {% if related_docs|selectattr("ocr_status", "equalto", "running")|list|length > 0 %}
-  setTimeout(function() {
-    location.reload();
-  }, 10000);
-  {% endif %}
-});
-</script>
-{% endblock %}

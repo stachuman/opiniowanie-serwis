@@ -6,7 +6,11 @@
       "Bash(conda activate:*)",
       "Bash(python:*)",
       "Bash(rg:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(ss:*)",
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(true)"
     ],
     "deny": []
   }

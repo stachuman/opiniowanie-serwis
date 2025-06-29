@@ -7,18 +7,37 @@ from fastapi import APIRouter, Request, Form, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session, select
 from datetime import datetime
+from pydantic import BaseModel
+from typing import List
 
 from app.db import engine, BASE_DIR
 from app.models import Document
-from app.search import is_fuzzy_match, normalize_text_for_search
+from app.search import is_fuzzy_match, normalize_text_for_search, extract_context_snippets, ContextSnippet
 from app.document_utils import STEP_ICON
 from app.text_extraction import get_document_text_content, HAS_DOCX
 from app.config import case_status_config
+from app.config.search_settings import SEARCH_SETTINGS
 
 # Moduł nawigacji
 from app.navigation import build_opinion_navigation, PageActionsBuilder
 
 router = APIRouter()
+
+
+# Model dla żądania dodatkowych kontekstów
+class AdditionalContextsRequest(BaseModel):
+    doc_id: int
+    search_term: str
+    search_content: bool = False
+    fuzzy_search: bool = False
+
+
+# Model dla odpowiedzi z kontekstami
+class ContextSnippetResponse(BaseModel):
+    highlighted_text: str
+    match_type: str
+    source_info: str
+    confidence: float
 
 
 @router.get("/", name="list_opinions")
@@ -88,6 +107,9 @@ def list_opinions(request: Request,
 
         # Wyszukiwanie - ZMIENIONA LOGIKA: wyszukiwanie w WSZYSTKICH dokumentach niezależnie od filtrów
         search_matches = {}
+        search_contexts = {}  # NOWE: przechowuje konteksty wyszukiwania (ograniczone do wyświetlenia)
+        search_total_contexts = {}  # NOWE: przechowuje rzeczywistą liczbę WSZYSTKICH kontekstów
+        
         if search and search.strip():
             search_term = search.strip()
             filtered_opinions = []
@@ -98,6 +120,8 @@ def list_opinions(request: Request,
 
             for opinion in all_opinions:
                 matches = []
+                context_snippets = []
+                all_context_snippets = []  # NOWE: wszystkie konteksty (bez limitów)
 
                 # Wyszukiwanie w metadanych
                 searchable_text = ' '.join(filter(None, [
@@ -106,19 +130,53 @@ def list_opinions(request: Request,
                     opinion.doc_type or ''
                 ]))
 
+                metadata_found = False
                 if search_term.lower() in searchable_text.lower():
                     matches.append('metadata')
+                    metadata_found = True
                 elif fuzzy_search and is_fuzzy_match(search_term, searchable_text):
                     matches.append('fuzzy_metadata')
+                    metadata_found = True
+
+                if metadata_found:
+                    # Dodaj kontekst dla metadanych
+                    metadata_contexts = extract_context_snippets(
+                        searchable_text, 
+                        search_term, 
+                        context_length=SEARCH_SETTINGS.get_context_length(),
+                        max_snippets=1,
+                        is_fuzzy=fuzzy_search
+                    )
+                    for snippet in metadata_contexts:
+                        snippet.match_type = 'metadata'
+                        snippet.source_info = 'Metadane dokumentu'
+                    context_snippets.extend(metadata_contexts)
 
                 # Wyszukiwanie w treści
                 if search_content:
                     content_text = get_document_text_content(opinion)
                     if content_text:
+                        content_found = False
                         if search_term.lower() in content_text.lower():
                             matches.append('content')
+                            content_found = True
                         elif fuzzy_search and is_fuzzy_match(search_term, content_text):
                             matches.append('fuzzy_content')
+                            content_found = True
+                        
+                        if content_found:
+                            # Dodaj kontekst dla treści głównej
+                            content_contexts = extract_context_snippets(
+                                content_text, 
+                                search_term, 
+                                context_length=SEARCH_SETTINGS.get_context_length(),
+                                max_snippets=SEARCH_SETTINGS.max_context_snippets_per_document,
+                                is_fuzzy=fuzzy_search
+                            )
+                            for snippet in content_contexts:
+                                snippet.match_type = 'content'
+                                snippet.source_info = 'Treść główna'
+                            context_snippets.extend(content_contexts)
                     
                     # NOWE: Wyszukiwanie także w dokumentach podrzędnych (załącznikach)
                     child_docs = session.exec(
@@ -128,13 +186,80 @@ def list_opinions(request: Request,
                     for child_doc in child_docs:
                         child_content = get_document_text_content(child_doc)
                         if child_content:
+                            child_found = False
                             if search_term.lower() in child_content.lower():
                                 matches.append('child_content')
+                                child_found = True
                             elif fuzzy_search and is_fuzzy_match(search_term, child_content):
                                 matches.append('fuzzy_child_content')
+                                child_found = True
+                            
+                            if child_found:
+                                # Dodaj kontekst dla dokumentów podrzędnych
+                                child_contexts = extract_context_snippets(
+                                    child_content, 
+                                    search_term, 
+                                    context_length=SEARCH_SETTINGS.get_context_length(),
+                                    max_snippets=SEARCH_SETTINGS.max_context_snippets_per_child,
+                                    is_fuzzy=fuzzy_search
+                                )
+                                for snippet in child_contexts:
+                                    snippet.match_type = 'attachment'
+                                    snippet.source_info = f'Załącznik: {child_doc.original_filename or "bez nazwy"}'
+                                context_snippets.extend(child_contexts)
 
                 if matches:
                     search_matches[opinion.id] = matches
+                    
+                    # NOWE: Oblicz rzeczywistą liczbę WSZYSTKICH kontekstów (tak jak w API)
+                    # Użyj tej samej logiki co w API endpoint
+                    all_contexts_for_api = []
+                    
+                    # Metadane (takie same jak powyżej)
+                    if metadata_found:
+                        metadata_contexts_all = extract_context_snippets(
+                            searchable_text, 
+                            search_term, 
+                            context_length=SEARCH_SETTINGS.get_context_length(),
+                            max_snippets=1,
+                            is_fuzzy=fuzzy_search
+                        )
+                        all_contexts_for_api.extend(metadata_contexts_all)
+                    
+                    # Treść główna z wysokimi limitami
+                    if search_content:
+                        content_text = get_document_text_content(opinion)
+                        if content_text and (search_term.lower() in content_text.lower() or 
+                                           (fuzzy_search and is_fuzzy_match(search_term, content_text))):
+                            content_contexts_all = extract_context_snippets(
+                                content_text, 
+                                search_term, 
+                                context_length=SEARCH_SETTINGS.get_context_length(),
+                                max_snippets=50,  # WYSOKI LIMIT jak w API
+                                is_fuzzy=fuzzy_search
+                            )
+                            all_contexts_for_api.extend(content_contexts_all)
+                        
+                        # Załączniki z wysokimi limitami
+                        child_docs = session.exec(
+                            select(Document).where(Document.parent_id == opinion.id)
+                        ).all()
+                        
+                        for child_doc in child_docs:
+                            child_content = get_document_text_content(child_doc)
+                            if child_content and (search_term.lower() in child_content.lower() or 
+                                                (fuzzy_search and is_fuzzy_match(search_term, child_content))):
+                                child_contexts_all = extract_context_snippets(
+                                    child_content, 
+                                    search_term, 
+                                    context_length=SEARCH_SETTINGS.get_context_length(),
+                                    max_snippets=50,  # WYSOKI LIMIT jak w API
+                                    is_fuzzy=fuzzy_search
+                                )
+                                all_contexts_for_api.extend(child_contexts_all)
+                    
+                    search_contexts[opinion.id] = context_snippets  # Ograniczone konteksty dla wyświetlenia
+                    search_total_contexts[opinion.id] = len(all_contexts_for_api)  # Rzeczywista liczba wszystkich
                     filtered_opinions.append(opinion)
 
             # NOWA LOGIKA: gdy wyszukiwanie jest aktywne, pokazuj WSZYSTKIE znalezione dokumenty
@@ -178,6 +303,9 @@ def list_opinions(request: Request,
             "total_count": len(opinions),
             "has_docx": HAS_DOCX,
             "search_matches": search_matches,
+            "search_contexts": search_contexts,  # NOWE: Konteksty wyszukiwania (ograniczone)
+            "search_total_contexts": search_total_contexts,  # NOWE: Rzeczywista liczba wszystkich kontekstów
+            "search_settings": SEARCH_SETTINGS,  # NOWE: Ustawienia wyszukiwania
             "current_year": datetime.now().year,
             "page_type": "opinions_list",  # NOWE: Dodany page_type
             # Dane statusów z konfiguracji
@@ -349,3 +477,125 @@ def opinion_update_note(request: Request, doc_id: int, note: str = Form("")):
                 str(request.url_for("list_opinions")) + "?note_updated=true",
                 status_code=303
             )
+
+
+@router.post("/api/search/additional-contexts", name="api_additional_contexts")
+def get_additional_contexts(request: AdditionalContextsRequest):
+    """API endpoint do pobierania dodatkowych kontekstów wyszukiwania."""
+    
+    with Session(engine) as session:
+        # Pobierz dokument
+        document = session.get(Document, request.doc_id)
+        if not document:
+            return {"success": False, "error": "Dokument nie znaleziony"}
+        
+        # Odtwórz DOKŁADNIE tę samą logikę co na stronie głównej
+        all_contexts = []
+        
+        # 1. Wyszukiwanie w metadanych (jak na stronie głównej)
+        searchable_text = ' '.join(filter(None, [
+            document.original_filename or '',
+            document.sygnatura or '',
+            document.doc_type or ''
+        ]))
+        
+        if request.search_term.lower() in searchable_text.lower():
+            metadata_contexts = extract_context_snippets(
+                searchable_text, 
+                request.search_term, 
+                context_length=SEARCH_SETTINGS.get_context_length(),
+                max_snippets=1,
+                is_fuzzy=request.fuzzy_search
+            )
+            for snippet in metadata_contexts:
+                snippet.match_type = 'metadata'
+                snippet.source_info = 'Metadane dokumentu'
+            all_contexts.extend(metadata_contexts)
+        elif request.fuzzy_search and is_fuzzy_match(request.search_term, searchable_text):
+            metadata_contexts = extract_context_snippets(
+                searchable_text, 
+                request.search_term, 
+                context_length=SEARCH_SETTINGS.get_context_length(),
+                max_snippets=1,
+                is_fuzzy=request.fuzzy_search
+            )
+            for snippet in metadata_contexts:
+                snippet.match_type = 'metadata'
+                snippet.source_info = 'Metadane dokumentu'
+            all_contexts.extend(metadata_contexts)
+        
+        # 2. Wyszukiwanie w treści głównej (jak na stronie głównej)
+        if request.search_content:
+            content_text = get_document_text_content(document)
+            if content_text:
+                content_found = False
+                if request.search_term.lower() in content_text.lower():
+                    content_found = True
+                elif request.fuzzy_search and is_fuzzy_match(request.search_term, content_text):
+                    content_found = True
+                
+                if content_found:
+                    content_contexts = extract_context_snippets(
+                        content_text, 
+                        request.search_term, 
+                        context_length=SEARCH_SETTINGS.get_context_length(),
+                        max_snippets=50,  # API: WYSOKIE LIMITY żeby pokazać WSZYSTKIE konteksty
+                        is_fuzzy=request.fuzzy_search
+                    )
+                    for snippet in content_contexts:
+                        snippet.match_type = 'content'
+                        snippet.source_info = 'Treść główna'
+                    all_contexts.extend(content_contexts)
+        
+        # 3. Wyszukiwanie w dokumentach podrzędnych (jak na stronie głównej)
+        if request.search_content:
+            child_docs = session.exec(
+                select(Document).where(Document.parent_id == document.id)
+            ).all()
+            
+            for child_doc in child_docs:
+                child_content = get_document_text_content(child_doc)
+                if child_content:
+                    child_found = False
+                    if request.search_term.lower() in child_content.lower():
+                        child_found = True
+                    elif request.fuzzy_search and is_fuzzy_match(request.search_term, child_content):
+                        child_found = True
+                    
+                    if child_found:
+                        child_contexts = extract_context_snippets(
+                            child_content, 
+                            request.search_term, 
+                            context_length=SEARCH_SETTINGS.get_context_length(),
+                            max_snippets=50,  # API: WYSOKIE LIMITY żeby pokazać WSZYSTKIE konteksty
+                            is_fuzzy=request.fuzzy_search
+                        )
+                        for snippet in child_contexts:
+                            snippet.match_type = 'attachment'
+                            snippet.source_info = f'Załącznik: {child_doc.original_filename or "bez nazwy"}'
+                        all_contexts.extend(child_contexts)
+        
+        # DEBUG: Sprawdź ile kontekstów znaleziono
+        print(f"🔍 [API] Znaleziono łącznie {len(all_contexts)} kontekstów dla dokumentu {request.doc_id}")
+        for i, ctx in enumerate(all_contexts):
+            print(f"  {i}: {ctx.match_type} - {ctx.source_info[:50]}...")
+        
+        # 4. KLUCZOWE: Zwróć WSZYSTKIE konteksty POWYŻEJ pierwszych 3 (wszystkie pozostałe)
+        additional_contexts = all_contexts[3:]  # Pomiń pierwsze 3 pokazane na stronie, zwróć wszystkie pozostałe
+        print(f"🔍 [API] Po pominięciu pierwszych 3: {len(additional_contexts)} dodatkowych kontekstów (wszystkie pozostałe)")
+        
+        # Konwertuj konteksty na format odpowiedzi
+        context_responses = []
+        for context in additional_contexts:
+            context_responses.append(ContextSnippetResponse(
+                highlighted_text=context.highlighted_text,
+                match_type=context.match_type,
+                source_info=context.source_info,
+                confidence=context.confidence
+            ))
+        
+        return {
+            "success": True,
+            "contexts": [ctx.dict() for ctx in context_responses],
+            "total_count": len(context_responses)
+        }
