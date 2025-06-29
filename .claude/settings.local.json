@@ -5,7 +5,8 @@
       "Bash(grep:*)",
       "Bash(conda activate:*)",
       "Bash(python:*)",
-      "Bash(rg:*)"
+      "Bash(rg:*)",
+      "Bash(sqlite3:*)"
     ],
     "deny": []
   }

@@ -233,9 +233,9 @@ def get_document_text_content(document, session=None):
         if ocr_results and ocr_results.strip():
             text_content = f"{text_content}\n\n=== OCR RESULTS ===\n{ocr_results}".strip()
 
-    # Zapisz w cache (max 2000 znaków aby nie zużywać za dużo pamięci)
-    cached_text = text_content[:2000] if text_content else ""
-    extracted_text_cache[cache_key] = cached_text
+    # POPRAWKA: Zapisz w cache PEŁNY tekst dla wyszukiwania (nie ograniczaj do 2000 znaków)
+    # Cache jest używany do optymalizacji, ale musi zawierać pełny tekst do wyszukiwania
+    extracted_text_cache[cache_key] = text_content
 
     return text_content
 

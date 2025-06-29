@@ -86,13 +86,17 @@ def list_opinions(request: Request,
 
         opinions = session.exec(query).all()
 
-        # Wyszukiwanie (kod bez zmian - zachowujemy istniejącą logikę)
+        # Wyszukiwanie - ZMIENIONA LOGIKA: wyszukiwanie w WSZYSTKICH dokumentach niezależnie od filtrów
         search_matches = {}
         if search and search.strip():
             search_term = search.strip()
             filtered_opinions = []
 
-            for opinion in opinions:
+            # Pobierz WSZYSTKIE główne dokumenty dla wyszukiwania (bez filtrów statusów)
+            all_docs_query = select(Document).where(Document.is_main == True)
+            all_opinions = session.exec(all_docs_query).all()
+
+            for opinion in all_opinions:
                 matches = []
 
                 # Wyszukiwanie w metadanych
@@ -115,11 +119,26 @@ def list_opinions(request: Request,
                             matches.append('content')
                         elif fuzzy_search and is_fuzzy_match(search_term, content_text):
                             matches.append('fuzzy_content')
+                    
+                    # NOWE: Wyszukiwanie także w dokumentach podrzędnych (załącznikach)
+                    child_docs = session.exec(
+                        select(Document).where(Document.parent_id == opinion.id)
+                    ).all()
+                    
+                    for child_doc in child_docs:
+                        child_content = get_document_text_content(child_doc)
+                        if child_content:
+                            if search_term.lower() in child_content.lower():
+                                matches.append('child_content')
+                            elif fuzzy_search and is_fuzzy_match(search_term, child_content):
+                                matches.append('fuzzy_child_content')
 
                 if matches:
                     search_matches[opinion.id] = matches
                     filtered_opinions.append(opinion)
 
+            # NOWA LOGIKA: gdy wyszukiwanie jest aktywne, pokazuj WSZYSTKIE znalezione dokumenty
+            # niezależnie od filtrów statusów
             opinions = filtered_opinions
 
         # Przygotuj dane filtrów do wyświetlenia
