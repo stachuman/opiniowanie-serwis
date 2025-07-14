@@ -647,19 +647,23 @@ nextPage() {
         try {
             const result = await window.apiClient.getOcrText(this.config.docId);
 
-            if (result.success && result.has_ocr && result.text.trim()) {
-                // ZMIANA: Aktualizuj cache dla wszystkich stron
-                this.updateOcrCacheForAllPages(result.text);
+            if (result.success && result.has_ocr) {
+                // ZMIANA: Zawsze akceptuj wynik jeśli ma OCR (nawet pusty)
+                const text = result.text || '';
+                
+                this.updateOcrCacheForAllPages(text);
+                this.updateDisplayText(text);
 
-                // Aktualizuj wyświetlanie
-                this.updateDisplayText(result.text);
-
-                // ZMIANA: Powiadom TextEditor (jeśli istnieje)
                 if (window.textEditor) {
-                    window.textEditor.setText(result.text);
+                    window.textEditor.setText(text);
                 }
 
-                window.alertManager.showSyncInfo();
+                if (text.trim()) {
+                    window.alertManager.showSyncInfo();
+                } else {
+                    // Pusty OCR - pokaż odpowiedni komunikat
+                    this.setupInitialMessage();
+                }
                 return true;
             }
             return false;

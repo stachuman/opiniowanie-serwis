@@ -561,10 +561,21 @@ class DocumentManager:
             # Pobierz tekst OCR
             ocr_text = get_ocr_text_for_document(doc_id, session)
 
+            # Sprawdź czy istnieje plik OCR (nawet jeśli pusty)
+            ocr_file_exists = False
+            with Session(engine) as temp_session:
+                ocr_txt_query = select(Document).where(
+                    Document.ocr_parent_id == doc_id,
+                    Document.doc_type == "ocr_txt"
+                ).order_by(Document.upload_time.desc())
+                ocr_doc = temp_session.exec(ocr_txt_query).first()
+                ocr_file_exists = bool(ocr_doc)
+
             return {
                 "success": True,
                 "text": ocr_text or "",
-                "has_ocr": bool(ocr_text and ocr_text.strip()),
+                "has_ocr": ocr_file_exists,  # True jeśli plik OCR istnieje (nawet pusty)
+                "has_text": bool(ocr_text and ocr_text.strip()),  # True tylko jeśli ma treść
                 "doc_id": doc_id
             }
 

@@ -165,6 +165,11 @@ def get_ocr_text_for_document(doc_id, session):
             print(f"❌ [TEXT_EXTRACTION] Plik OCR nie istnieje: {ocr_file_path}")
             return ""
 
+        # Sprawdź rozmiar pliku - jeśli pusty, zwróć od razu
+        if ocr_file_path.stat().st_size == 0:
+            print(f"📝 [TEXT_EXTRACTION] Plik OCR jest pusty: {ocr_file_path}")
+            return ""
+
         encodings = ['utf-8', 'latin-1', 'cp1250']
         for encoding in encodings:
             try:
@@ -260,6 +265,10 @@ def get_text_preview(doc_id, max_length=None):
             text_path = FILES_DIR / doc.stored_filename
             if not text_path.exists():
                 return "Plik tekstowy nie istnieje"
+
+            # Sprawdź rozmiar pliku - jeśli pusty, zwróć od razu
+            if text_path.stat().st_size == 0:
+                return ""
 
             # Próba odczytu z różnymi kodowaniami
             encodings = ['utf-8', 'latin-1', 'cp1250']

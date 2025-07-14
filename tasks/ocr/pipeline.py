@@ -312,7 +312,17 @@ def save_ocr_results(doc_id: int, text_content: str, confidence: float,
 
     update_document_status(doc_id, "running", "Zapisywanie wyników", 0.9)
 
-    # Zapisz tekst do pliku
+    # KRYTYCZNE: Walidacja tekstu przed zapisem
+    if text_content is None:
+        raise Exception("OCR zwrócił None - proces zakończony niepowodzeniem")
+    
+    if not isinstance(text_content, str):
+        raise Exception(f"OCR zwrócił nieprawidłowy typ danych: {type(text_content)}")
+    
+    if len(text_content.strip()) == 0:
+        raise Exception("OCR nie rozpoznał żadnego tekstu - obraz może być nieczytelny lub uszkodzony")
+
+    # Zapisz tekst do pliku (tylko jeśli walidacja przeszła)
     txt_filename = f"{uuid.uuid4().hex}.txt"
     txt_path = FILES_DIR / txt_filename
     txt_path.write_text(text_content, encoding="utf-8")
