@@ -237,6 +237,9 @@
             <div class="card-header d-flex justify-content-between align-items-center">
               <h6 class="mb-0">Rozpoznany tekst</h6>
               <div class="btn-group">
+                <button type="button" class="btn btn-sm btn-outline-primary" id="toggleOcrViewBtn" onclick="toggleOcrTextView()">
+                  <i class="bi bi-table"></i> Pokaż jako tabelę
+                </button>
                 <button type="button" class="btn btn-sm btn-outline-info refresh-ocr-btn"
                         data-ocr-doc-id="{{ ocr_txt.id }}">
                   <i class="bi bi-arrow-clockwise"></i> Odśwież
@@ -248,8 +251,11 @@
             </div>
             <div class="card-body">
               <div id="ocrTextContent">
-                <pre class="text-preview bg-white p-3 border rounded"
-                     style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.9rem;">{{ ocr_text_preview }}</pre>
+                <div class="text-preview bg-white p-3 border rounded"
+                     style="max-height: 500px; overflow-y: auto; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.9rem;"
+                     data-raw-text="{{ ocr_text_preview | e }}">
+                  <!-- OCR text will be processed and inserted here by JavaScript -->
+                </div>
               </div>
 
               <!-- Loader dla odświeżania -->
@@ -313,6 +319,75 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+/* Styles for OCR HTML content */
+#ocrTextContent .text-preview table {
+  width: 100%;
+  margin-bottom: 1rem;
+  border-collapse: collapse;
+}
+
+#ocrTextContent .text-preview td,
+#ocrTextContent .text-preview th {
+  padding: 0.375rem !important;
+  vertical-align: top !important;
+  border: 1px solid #dee2e6 !important;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+#ocrTextContent .text-preview th {
+  background-color: #f8f9fa !important;
+  font-weight: bold !important;
+}
+
+#ocrTextContent .text-preview tr:nth-child(even) {
+  background-color: rgba(0,0,0,0.02);
+}
+
+#ocrTextContent .text-preview tr:hover {
+  background-color: rgba(0,0,0,0.05);
+}
+
+/* Text mode styles */
+#ocrTextContent .text-preview[style*="pre-wrap"] {
+  font-family: 'Courier New', monospace !important;
+  line-height: 1.5;
+  white-space: pre-wrap !important;
+}
+
+/* Smooth transitions */
+#ocrTextContent .text-preview {
+  transition: all 0.2s ease;
+}
+
+/* Page dividers for PDF OCR */
+#ocrTextContent .text-preview .page-divider {
+  border: none;
+  border-top: 2px solid #007bff;
+  margin: 1.5rem 0 0.5rem 0;
+  opacity: 0.7;
+}
+
+#ocrTextContent .text-preview .page-number {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6c757d !important;
+  margin-top: -0.5rem;
+}
+
+#ocrTextContent .text-preview .page-divider:hover {
+  opacity: 1;
+}
+
+/* First page shouldn't have divider at the top */
+#ocrTextContent .text-preview .page-divider[data-page="1"] {
+  display: none;
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
@@ -971,9 +1046,114 @@ function showPreviewFallback() {
   }
 }
 
+/**
+ * Bezpieczne przetwarzanie tekstu OCR z interpretacją tagów HTML
+ */
+function processOcrText() {
+  const textContainer = document.querySelector('#ocrTextContent .text-preview');
+  if (!textContainer) return;
+
+  const rawText = textContainer.getAttribute('data-raw-text');
+  if (!rawText) return;
+
+  console.log('Processing OCR text with HTML tags...');
+
+  // Sprawdź czy tekst zawiera tagi HTML
+  const hasHtmlTags = /<[^>]+>/g.test(rawText);
+  const toggleBtn = document.getElementById('toggleOcrViewBtn');
+  
+  if (!hasHtmlTags) {
+    // Brak tagów HTML - wyświetl jako zwykły tekst i ukryj przycisk
+    textContainer.style.whiteSpace = 'pre-wrap';
+    textContainer.textContent = rawText;
+    if (toggleBtn) {
+      toggleBtn.style.display = 'none';
+    }
+    return;
+  }
+
+  // Pokazuj przycisk przełączania gdy są tagi HTML
+  if (toggleBtn) {
+    toggleBtn.style.display = 'inline-block';
+    toggleBtn.innerHTML = '<i class="bi bi-file-text"></i> Pokaż jako tekst';
+  }
+
+  // Przetwórz HTML z bezpiecznymi tagami
+  const processedHtml = processHtmlTags(rawText);
+  textContainer.innerHTML = processedHtml;
+}
+
+/**
+ * Przetwarza tekst HTML, dozwolając tylko bezpieczne tagi
+ */
+function processHtmlTags(text) {
+  // Lista dozwolonych tagów (głównie tabele)
+  const allowedTags = ['table', 'tr', 'td', 'th', 'thead', 'tbody', 'tfoot', 'caption', 'br', 'p', 'div', 'span', 'strong', 'em', 'b', 'i', 'u', 'hr'];
+  const allowedAttributes = ['class', 'style', 'colspan', 'rowspan', 'align', 'valign'];
+
+  // Konwertuj page dividers na horizontal lines
+  let cleanText = text
+    // Konwertuj różne warianty "=== Strona X ===" na styled HR z numerem strony
+    .replace(/(?:^|\n)\s*=== Strona (\d+) ===\s*(?:\n|$)/gm, 
+      (match, pageNum) => {
+        return `\n<hr class="page-divider" data-page="${pageNum}">\n<div class="page-number text-center text-muted small mb-3">Strona ${pageNum}</div>\n`;
+      })
+    // Obsłuż także przypadki bez spacji
+    .replace(/(?:^|\n)\s*===Strona(\d+)===\s*(?:\n|$)/gm, 
+      (match, pageNum) => {
+        return `\n<hr class="page-divider" data-page="${pageNum}">\n<div class="page-number text-center text-muted small mb-3">Strona ${pageNum}</div>\n`;
+      });
+
+  // Podstawowe oczyszczenie - usuń niebezpieczne tagi
+  cleanText = cleanText
+    .replace(/<script[^>]*>.*?<\/script>/gis, '') // Usuń skrypty
+    .replace(/<iframe[^>]*>.*?<\/iframe>/gis, '') // Usuń iframe
+    .replace(/<object[^>]*>.*?<\/object>/gis, '')  // Usuń object
+    .replace(/<embed[^>]*>/gis, '')               // Usuń embed
+    .replace(/<form[^>]*>.*?<\/form>/gis, '')     // Usuń formularze
+    .replace(/on\w+="[^"]*"/gi, '');              // Usuń event handlery
+
+  // Dodaj style dla tabel
+  cleanText = cleanText.replace(/<table/gi, '<table class="table table-bordered table-sm"');
+  
+  // Dodaj style dla komórek z wyrównaniem
+  cleanText = cleanText
+    .replace(/<td([^>]*)>/gi, '<td$1 style="padding: 0.25rem; vertical-align: top; border: 1px solid #dee2e6;">')
+    .replace(/<th([^>]*)>/gi, '<th$1 style="padding: 0.25rem; vertical-align: top; border: 1px solid #dee2e6; background-color: #f8f9fa; font-weight: bold;">');
+
+  return cleanText;
+}
+
+/**
+ * Przełącza między widokiem HTML a tekstowym
+ */
+function toggleOcrTextView() {
+  const textContainer = document.querySelector('#ocrTextContent .text-preview');
+  if (!textContainer) return;
+
+  const rawText = textContainer.getAttribute('data-raw-text');
+  const isCurrentlyHtml = !textContainer.style.whiteSpace;
+
+  if (isCurrentlyHtml) {
+    // Przełącz na widok tekstowy
+    textContainer.style.whiteSpace = 'pre-wrap';
+    textContainer.textContent = rawText;
+    document.getElementById('toggleOcrViewBtn').innerHTML = '<i class="bi bi-table"></i> Pokaż jako tabelę';
+  } else {
+    // Przełącz na widok HTML
+    textContainer.style.whiteSpace = '';
+    const processedHtml = processHtmlTags(rawText);
+    textContainer.innerHTML = processedHtml;
+    document.getElementById('toggleOcrViewBtn').innerHTML = '<i class="bi bi-file-text"></i> Pokaż jako tekst';
+  }
+}
+
 // Inicjalizacja po załadowaniu DOM
 document.addEventListener('DOMContentLoaded', function() {
   console.log('DOM załadowany, rozpoczynam inicjalizację...');
+
+  // Przetwórz tekst OCR
+  processOcrText();
 
   // Inicjalizuj Document Preview
   initializeDocumentPreview();

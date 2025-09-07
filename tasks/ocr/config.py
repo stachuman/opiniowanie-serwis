@@ -6,10 +6,19 @@ import os
 from pathlib import Path
 
 # Stałe dla modelu OCR
-DEFAULT_OCR_INSTRUCTION = "Read all text in the image. Extract all visible text including headers, footers, paragraphs, lists, and tables. Preserve original formatting as much as possible. Output to be a plain text. Ignore watermarks. Text is in Polish."
-OCR_MODEL_PATH = "Qwen/Qwen2.5-VL-7B-Instruct"
-#OCR_MODEL_PATH = "nanonets/Nanonets-OCR-s"
-MAX_NEW_TOKENS = 8000
+DEFAULT_OCR_INSTRUCTION = "Extract all text from image. Text is in Polish."
+
+# Wybór modelu OCR - zmień tutaj aby przełączyć model
+OCR_MODEL_TYPE = "dots"  # "qwen" lub "dots"
+
+# Ścieżki do modeli
+QWEN_MODEL_PATH = "Qwen/Qwen2.5-VL-7B-Instruct"
+DOTS_MODEL_PATH = "../dots.ocr/weights/DotsOCR"
+
+# Aktywny model (dla kompatybilności wstecznej)
+OCR_MODEL_PATH = QWEN_MODEL_PATH if OCR_MODEL_TYPE == "qwen" else DOTS_MODEL_PATH
+
+MAX_NEW_TOKENS = 24000
 
 # Konfiguracja logowania
 LOG_DIR = os.getenv("OCR_LOG_DIR", "/var/log")
@@ -43,18 +52,23 @@ def setup_logger():
 logger = setup_logger()
 
 # Ustawienia dla timeout'ów
-OCR_TIMEOUT_SECONDS = 600  # 10 minut na stronę
+DOTS_TIMEOUT_SECONDS = 300  # 5 min dla DOTS
+QWEN_TIMEOUT_SECONDS = 600  # 10 min dla Qwen
+OCR_TIMEOUT_SECONDS = DOTS_TIMEOUT_SECONDS if OCR_MODEL_TYPE == "dots" else QWEN_TIMEOUT_SECONDS
 WATCHDOG_TIMEOUT_SECONDS = 1800  # 30 minut na cały dokument
+
+# Timeout dla fallback DOTS → QWEN (50% normalnego timeout dla DOTS)
+DOTS_FALLBACK_TIMEOUT_SECONDS = 300
 
 # Ustawienia dla preprocessingu
 DPI = 300  # Rozdzielczość przy konwersji PDF -> obraz
-MAX_IMAGE_DIMENSION = int(os.getenv("OCR_MAX_IMAGE_DIMENSION", "1536"))  # Maksymalny rozmiar obrazu (dla oszczędności pamięci GPU)
-MIN_IMAGE_DIMENSION = int(os.getenv("OCR_MIN_IMAGE_DIMENSION", "1000"))  # Minimalny rozmiar obrazu (dla jakości OCR)
+MAX_IMAGE_DIMENSION = 2500
+MIN_IMAGE_DIMENSION = 1000
 # 'single'  → cały model na widoczną kartę (CUDA_VISIBLE_DEVICES)
 # 'auto'    → HuggingFace rozdziela warstwy na wszystkie karty
 DEVICE_STRATEGY = os.getenv("OCR_DEVICE_STRATEGY", "single").lower()
 
 # Ile pamięci zostawiamy na GPU (GiB) – aby uniknąć OOM przy single
-GPU_MEM_LIMIT_GB = int(os.getenv("OCR_GPU_MEM_LIMIT_GB", "23"))
+GPU_MEM_LIMIT_GB = int(os.getenv("OCR_GPU_MEM_LIMIT_GB", "22"))
 
 GPU_SELECT_MODE  = os.getenv("OCR_GPU_SELECT", "auto").lower()

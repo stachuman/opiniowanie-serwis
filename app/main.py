@@ -90,6 +90,40 @@ def ensure_multiprocessing_setup():
         print(f"❌ [MAIN] Błąd sprawdzania multiprocessing: {e}")
 
 
+def reset_interrupted_ocr_processes():
+    """Resetuj procesy OCR które były przerwane przez restart aplikacji."""
+    try:
+        with Session(engine) as session:
+            # Znajdź dokumenty z status "running" lub "pending"
+            interrupted_docs = session.exec(
+                select(Document).where(Document.ocr_status.in_(["running", "pending"]))
+            ).all()
+            
+            if not interrupted_docs:
+                print("📋 [STARTUP] Brak przerwanych procesów OCR do zresetowania")
+                return
+            
+            print(f"🔄 [STARTUP] Znaleziono {len(interrupted_docs)} przerwanych procesów OCR")
+            
+            # Resetuj status każdego przerwaneego dokumentu
+            for doc in interrupted_docs:
+                old_status = doc.ocr_status
+                doc.ocr_status = "none"  # Resetuj do stanu początkowego
+                doc.ocr_progress = None
+                doc.ocr_progress_info = None
+                doc.ocr_current_page = None
+                doc.ocr_total_pages = None
+                
+                print(f"  📄 [STARTUP] Dokument #{doc.id} ({doc.original_filename}): {old_status} → none")
+            
+            # Zapisz zmiany
+            session.commit()
+            print(f"✅ [STARTUP] Zresetowano {len(interrupted_docs)} przerwanych procesów OCR")
+            
+    except Exception as e:
+        print(f"❌ [STARTUP] Błąd resetowania procesów OCR: {e}")
+
+
 @app.on_event("startup")
 async def startup():
     """Inicjalizacja aplikacji przy starcie."""
@@ -100,6 +134,9 @@ async def startup():
 
     # Ensure database tables are created
     init_db()
+
+    # Resetuj przerwane procesy OCR
+    reset_interrupted_ocr_processes()
 
     # Uruchomienie nowego systemu workerów zadań w tle
     from app.background_tasks import start_background_workers
@@ -129,14 +166,14 @@ async def detect_blocking_operations(request: Request, call_next):
     # Zidentyfikuj żądanie
     request_id = str(uuid.uuid4())[:8]
     path = request.url.path
-    print(f"[{request_id}] Rozpoczęto żądanie: {path}")
+    #print(f"[{request_id}] Rozpoczęto żądanie: {path}")
 
     # Wykonaj żądanie
     response = await call_next(request)
 
     # Sprawdź czas wykonania
     elapsed = time.time() - start_time
-    print(f"[{request_id}] Zakończono żądanie: {path} w {elapsed:.4f}s")
+    #print(f"[{request_id}] Zakończono żądanie: {path} w {elapsed:.4f}s")
 
     # Loguj długie żądania
     if elapsed > 1.0:
@@ -207,4 +244,4 @@ if __name__ == "__main__":
     ensure_multiprocessing_setup()
 
     print("🚀 [MAIN] Uruchamianie serwera...")
-    uvicorn.run(app, host="0.0.0.0", port=80)
+    uvicorn.run(app, host="0.0.0.0", port=80, access_log=False)

@@ -14,7 +14,11 @@ from typing import Any, Dict, Tuple
 import pynvml
 
 import torch
-from transformers import AutoModelForVision2Seq, AutoProcessor
+from transformers import AutoModelForVision2Seq, AutoModelForCausalLM, AutoProcessor
+from PIL import ImageFile
+
+# Enable loading of truncated/progressive JPEG images
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from .config import (
     DEFAULT_OCR_INSTRUCTION,
@@ -22,7 +26,13 @@ from .config import (
     GPU_MEM_LIMIT_GB,
     GPU_SELECT_MODE,
     OCR_MODEL_PATH,
+    OCR_MODEL_TYPE,
     OCR_TIMEOUT_SECONDS,
+    DOTS_FALLBACK_TIMEOUT_SECONDS,
+    DOTS_TIMEOUT_SECONDS,
+    QWEN_TIMEOUT_SECONDS,
+    QWEN_MODEL_PATH,
+    DOTS_MODEL_PATH,
     MAX_NEW_TOKENS,
     logger,
 )
@@ -64,36 +74,52 @@ def _pick_best_gpu(threshold_gb: int) -> int | None:
         best_free = 0.0
         best_perf = 0
 
+        logger.info(f"🔍 [GPU_SELECT] Szukam GPU z ≥{threshold_gb}GB wolnej pamięci...")
+        
         for i in range(torch.cuda.device_count()):
             handle = pynvml.nvmlDeviceGetHandleByIndex(i)
 
-            free, _ = torch.cuda.mem_get_info(i)
+            free, total = torch.cuda.mem_get_info(i)
             free_gb = free / (1024 ** 3)
+            total_gb = total / (1024 ** 3)
+            used_gb = total_gb - free_gb
+            
+            logger.info(f"🔍 [GPU_SELECT] GPU {i}: {free_gb:.2f}GB wolne / {total_gb:.2f}GB total ({used_gb:.2f}GB użyte)")
 
             if free_gb >= threshold_gb:
                 performance = get_gpu_performance(handle)
+                logger.info(f"✅ [GPU_SELECT] GPU {i} spełnia kryterium (≥{threshold_gb}GB), performance: {performance}")
 
                 if (free_gb > best_free) or (free_gb == best_free and performance > best_perf):
                     best_gpu = i
                     best_free = free_gb
                     best_perf = performance
+                    logger.info(f"🏆 [GPU_SELECT] GPU {i} to nowy kandydat ({free_gb:.2f}GB)")
+            else:
+                logger.info(f"❌ [GPU_SELECT] GPU {i} nie spełnia kryterium ({free_gb:.2f}GB < {threshold_gb}GB)")
 
         pynvml.nvmlShutdown()
+        
+        if best_gpu is not None:
+            logger.info(f"🎯 [GPU_SELECT] Wybrano GPU {best_gpu} z {best_free:.2f}GB wolnej pamięci")
+        else:
+            logger.info(f"⚠️ [GPU_SELECT] Nie znaleziono GPU z ≥{threshold_gb}GB wolnej pamięci")
+            
         return best_gpu
     except Exception as e:
         logger.error(f"Błąd _pick_best_gpu: {e}")
-        return 0  # Fallback na GPU 0
+        return None  # FIX: Return None instead of 0 to trigger fallback logic
 
 
 # ---------------------------------------------------------------------------
 #  Model + processor – singleton w pamięci procesu
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=1)
-def _load_once() -> Tuple[AutoModelForVision2Seq, AutoProcessor]:
-    """Ładuje model OCR - raz na proces."""
-    print(f"🔄 [OCR_MODELS] Ładowanie modelu w procesie PID={os.getpid()}")
-    logger.info(f"🔄 [OCR_MODELS] Ładowanie modelu w procesie PID={os.getpid()}")
+@lru_cache(maxsize=4)
+def _load_once(model_type: str, model_path: str) -> Tuple[Any, AutoProcessor]:
+    """Ładuje model OCR - raz na proces, z cache bazującym na typie modelu."""
+    print(f"🔄 [OCR_MODELS] Ładowanie modelu {model_type} w procesie PID={os.getpid()}")
+    logger.info(f"🔄 [OCR_MODELS] Ładowanie modelu {model_type} w procesie PID={os.getpid()}")
 
     try:
         # Sprawdź czy CUDA jest dostępna
@@ -104,22 +130,22 @@ def _load_once() -> Tuple[AutoModelForVision2Seq, AutoProcessor]:
         logger.info(f"🔍 [OCR_MODELS] CUDA dostępna, liczba GPU: {torch.cuda.device_count()}")
 
         # Sprawdź czy to lokalny path czy Hugging Face Hub
-        if "/" in OCR_MODEL_PATH and not Path(OCR_MODEL_PATH).exists():
-            print(f"🌐 [OCR_MODELS] Model z Hugging Face Hub: {OCR_MODEL_PATH}")
-            logger.info(f"Model z Hugging Face Hub: {OCR_MODEL_PATH}")
+        if "/" in model_path and not Path(model_path).exists():
+            print(f"🌐 [OCR_MODELS] Model z Hugging Face Hub: {model_path}")
+            logger.info(f"Model z Hugging Face Hub: {model_path}")
 
             # Sprawdź cache HF
             try:
                 from transformers import AutoConfig
                 print(f"🔍 [OCR_MODELS] Sprawdzam dostępność modelu...")
-                config = AutoConfig.from_pretrained(OCR_MODEL_PATH)
+                config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
                 print(f"✅ [OCR_MODELS] Model dostępny w HF Hub")
             except Exception as e:
                 raise Exception(f"Model niedostępny w HF Hub: {str(e)}")
-        elif Path(OCR_MODEL_PATH).exists():
-            print(f"📁 [OCR_MODELS] Model lokalny istnieje: {OCR_MODEL_PATH}")
+        elif Path(model_path).exists():
+            print(f"📁 [OCR_MODELS] Model lokalny istnieje: {model_path}")
         else:
-            raise Exception(f"Model nie istnieje lokalnie ani w HF Hub: {OCR_MODEL_PATH}")
+            raise Exception(f"Model nie istnieje lokalnie ani w HF Hub: {model_path}")
 
         strategy = CFG_STRATEGY
 
@@ -146,27 +172,47 @@ def _load_once() -> Tuple[AutoModelForVision2Seq, AutoProcessor]:
         except Exception as e:
             print(f"⚠️ [OCR_MODELS] Nie można sprawdzić pamięci GPU: {e}")
 
-        params: Dict[str, Any] = {"torch_dtype": torch.float16, "trust_remote_code": True}
-        if strategy == "single":
-            params["device_map"] = gpu  # ← kluczowa linia
-            params["max_memory"] = {gpu: f"{GPU_MEM_LIMIT_GB}GiB"}
+        # Parametry ładowania modelu
+        if model_type == "dots":
+            # DOTS model parametry - force single GPU to avoid device conflicts
+            params: Dict[str, Any] = {
+                "attn_implementation": "flash_attention_2",
+                "torch_dtype": torch.bfloat16,
+                "trust_remote_code": True,
+                "device_map": f"cuda:{gpu}",  # Force single GPU for DOTS
+                "max_memory": {gpu: f"{GPU_MEM_LIMIT_GB}GiB"}
+            }
+            print(f"🔍 [OCR_MODELS] DOTS forced to single GPU: cuda:{gpu}")
         else:
-            params["device_map"] = "auto"
+            # Qwen model parametry  
+            params: Dict[str, Any] = {"torch_dtype": torch.float16, "trust_remote_code": True}
+            
+            if strategy == "single":
+                params["device_map"] = gpu
+                params["max_memory"] = {gpu: f"{GPU_MEM_LIMIT_GB}GiB"}
+            else:
+                params["device_map"] = "auto"
 
         print(f"🔍 [OCR_MODELS] Parametry ładowania: {params}")
         logger.info("Ładowanie modelu z parametrami: %s", params)
 
         try:
-            model = AutoModelForVision2Seq.from_pretrained(OCR_MODEL_PATH, **params).eval()
+            if model_type == "dots":
+                model = AutoModelForCausalLM.from_pretrained(model_path, **params).eval()
+            else:
+                model = AutoModelForVision2Seq.from_pretrained(model_path, **params).eval()
             print(f"✅ [OCR_MODELS] Model załadowany pomyślnie")
         except torch.cuda.OutOfMemoryError:
             print(f"⚠️ [OCR_MODELS] OOM - ponawiam z device_map='auto'")
             logger.warning("OOM – ponawiam z device_map='auto'")
             params.pop("max_memory", None)
             params["device_map"] = "auto"
-            model = AutoModelForVision2Seq.from_pretrained(OCR_MODEL_PATH, **params).eval()
+            if model_type == "dots":
+                model = AutoModelForCausalLM.from_pretrained(model_path, **params).eval()
+            else:
+                model = AutoModelForVision2Seq.from_pretrained(model_path, **params).eval()
 
-        processor = AutoProcessor.from_pretrained(OCR_MODEL_PATH)
+        processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
         print(f"✅ [OCR_MODELS] Processor załadowany pomyślnie")
 
         logger.info(f"✅ [OCR_MODELS] Model i processor załadowane w procesie PID={os.getpid()}")
@@ -184,11 +230,14 @@ def _load_once() -> Tuple[AutoModelForVision2Seq, AutoProcessor]:
         raise Exception(f"Nie można załadować modelu OCR: {str(e)}")
 
 
-def get_ocr_model() -> Tuple[AutoModelForVision2Seq, AutoProcessor]:
+def get_ocr_model() -> Tuple[Any, AutoProcessor]:
     """Publiczny interfejs do pobierania modelu OCR."""
     print(f"🔍 [OCR_MODELS] get_ocr_model wywołane w procesie PID={os.getpid()}")
     try:
-        return _load_once()
+        # Import current config values to get the most up-to-date configuration
+        from .config import OCR_MODEL_TYPE, OCR_MODEL_PATH
+        print(f"🔍 [OCR_MODELS] Current config: {OCR_MODEL_TYPE} @ {OCR_MODEL_PATH}")
+        return _load_once(OCR_MODEL_TYPE, OCR_MODEL_PATH)
     except Exception as e:
         print(f"❌ [OCR_MODELS] Błąd w get_ocr_model: {str(e)}")
         raise
@@ -202,6 +251,127 @@ def _timeout_handler(_signum, _frame):
     raise TimeoutError("Timeout podczas generacji tekstu")
 
 
+def process_image_to_text_with_fallback(
+        image_path: str | Path,
+        instruction: str = DEFAULT_OCR_INSTRUCTION,
+        skip_preprocessing=False,
+):
+    """
+    Rozpoznaje tekst z obrazu z fallback DOTS → QWEN.
+    
+    1. Próbuje DOTS z skróconym timeout (50% normalnego)
+    2. Jeśli DOTS timeout → automatycznie przełącza na QWEN
+    3. Każdy obraz zaczyna od DOTS (brak trwałego stanu fallback)
+    """
+    print(f"🔍 [OCR_MODELS] process_image_to_text_with_fallback dla: {image_path}")
+    
+    # Zawsze zacznij od DOTS jeśli to domyślny model
+    if OCR_MODEL_TYPE == "dots":
+        print(f"🎯 [OCR_MODELS] Próbuję DOTS z timeout {DOTS_FALLBACK_TIMEOUT_SECONDS}s")
+        
+        try:
+            # Próbuj DOTS z skróconym timeout
+            result = process_image_to_text_internal(
+                image_path=image_path,
+                instruction=instruction,
+                model_type="dots",
+                model_path=DOTS_MODEL_PATH,
+                timeout_seconds=DOTS_FALLBACK_TIMEOUT_SECONDS,
+                skip_preprocessing=skip_preprocessing
+            )
+            print(f"✅ [OCR_MODELS] DOTS zakończony pomyślnie: {len(result)} znaków")
+            return result
+            
+        except TimeoutError as timeout_err:
+            print(f"⏰ [OCR_MODELS] DOTS timeout po {DOTS_FALLBACK_TIMEOUT_SECONDS}s - przełączam na QWEN")
+            logger.warning(f"DOTS timeout - fallback na QWEN dla obrazu: {image_path}")
+            print(f"🔄 [OCR_MODELS] Timeout error details: {str(timeout_err)}")
+            
+            # Fallback na QWEN
+            try:
+                result = process_image_to_text_internal(
+                    image_path=image_path,
+                    instruction=instruction,
+                    model_type="qwen",
+                    model_path=QWEN_MODEL_PATH,
+                    timeout_seconds=QWEN_TIMEOUT_SECONDS,
+                    skip_preprocessing=skip_preprocessing
+                )
+                print(f"✅ [OCR_MODELS] QWEN fallback zakończony pomyślnie: {len(result)} znaków")
+                return result
+                
+            except Exception as qwen_error:
+                print(f"❌ [OCR_MODELS] QWEN fallback także nieudany: {str(qwen_error)}")
+                logger.error(f"QWEN fallback failed: {str(qwen_error)}")
+                # Return meaningful error instead of crashing
+                return f"[Błąd OCR: DOTS timeout po {DOTS_FALLBACK_TIMEOUT_SECONDS}s, QWEN fallback także nieudany: {str(qwen_error)}]"
+        
+        except Exception as dots_error:
+            # Inny błąd niż timeout - nie próbuj fallback
+            print(f"❌ [OCR_MODELS] DOTS błąd (nie timeout): {str(dots_error)}")
+            raise
+    
+    else:
+        # Dla QWEN jako domyślny model - użyj normalnej funkcji
+        print(f"🎯 [OCR_MODELS] Używam QWEN (domyślny model)")
+        return process_image_to_text(
+            image_path=image_path,
+            instruction=instruction,
+            skip_preprocessing=skip_preprocessing
+        )
+
+
+def process_image_to_text_internal(
+        image_path: str | Path,
+        instruction: str,
+        model_type: str,
+        model_path: str,
+        timeout_seconds: int,
+        skip_preprocessing=False,
+):
+    """Wewnętrzna funkcja OCR z określonym modelem i timeout."""
+    print(f"🔍 [OCR_MODELS] process_image_to_text_internal: {model_type} @ {image_path}")
+    
+    # Import current values
+    from .config import OCR_MODEL_TYPE, OCR_MODEL_PATH, OCR_TIMEOUT_SECONDS
+    
+    # Tymczasowo ustaw model type i path
+    original_model_type = OCR_MODEL_TYPE
+    original_model_path = OCR_MODEL_PATH
+    original_timeout = OCR_TIMEOUT_SECONDS
+    
+    try:
+        # Zmień konfigurację tymczasowo
+        import tasks.ocr.config as config_module
+        config_module.OCR_MODEL_TYPE = model_type
+        config_module.OCR_MODEL_PATH = model_path
+        config_module.OCR_TIMEOUT_SECONDS = timeout_seconds
+        
+        # Wyczyść cache modelu żeby załadować nowy model
+        _load_once.cache_clear()
+        print(f"🔍 [OCR_MODELS] Cache cleared for model switch")
+        
+        # Uruchom OCR z nową konfiguracją
+        result = process_image_to_text_core(
+            image_path=image_path,
+            instruction=instruction,
+            timeout_seconds=timeout_seconds,
+            skip_preprocessing=skip_preprocessing
+        )
+        
+        return result
+        
+    finally:
+        # Przywróć oryginalną konfigurację
+        config_module.OCR_MODEL_TYPE = original_model_type
+        config_module.OCR_MODEL_PATH = original_model_path
+        config_module.OCR_TIMEOUT_SECONDS = original_timeout
+        
+        # Wyczyść cache po zmianie modelu z powrotem
+        _load_once.cache_clear()
+        print(f"🔍 [OCR_MODELS] Cache cleared after config restoration")
+
+
 def process_image_to_text(
         image_path: str | Path,
         instruction: str = DEFAULT_OCR_INSTRUCTION,
@@ -210,7 +380,31 @@ def process_image_to_text(
         skip_preprocessing=False,
 ):
     """Rozpoznaje tekst z obrazu i zwraca go jako string."""
-    print(f"🔍 [OCR_MODELS] process_image_to_text wywołane dla: {image_path}")
+    try:
+        return process_image_to_text_core(
+            image_path=image_path,
+            instruction=instruction,
+            timeout_seconds=OCR_TIMEOUT_SECONDS,
+            skip_preprocessing=skip_preprocessing
+        )
+    except TimeoutError as e:
+        # For backwards compatibility, return timeout as text
+        print(f"⏰ [OCR_MODELS] process_image_to_text timeout: {str(e)}")
+        return f"[Timeout OCR]"
+
+
+def process_image_to_text_core(
+        image_path: str | Path,
+        instruction: str = DEFAULT_OCR_INSTRUCTION,
+        timeout_seconds: int = OCR_TIMEOUT_SECONDS,
+        skip_preprocessing=False,
+):
+    """Podstawowa funkcja OCR - wydzielona logika z process_image_to_text."""
+    print(f"🔍 [OCR_MODELS] process_image_to_text_core dla: {image_path} (timeout: {timeout_seconds}s)")
+    
+    # Dostosuj instrukcję dla modelu DOTS
+    #if OCR_MODEL_TYPE == "dots":
+    #    instruction = "Extract the text content from this image. Language is Polish."
 
     # Agresywne czyszczenie pamięci przed rozpoczęciem OCR
     from .utils import aggressive_memory_cleanup, get_available_gpu_memory
@@ -232,16 +426,15 @@ def process_image_to_text(
         print(f"❌ [OCR_MODELS] {error_msg}")
         raise Exception(error_msg)
 
-    # Jeśli nie podano modelu lub procesora, załaduj je
-    if model is None or processor is None:
-        print(f"🔍 [OCR_MODELS] Ładowanie modelu i procesora...")
-        try:
-            model, processor = get_ocr_model()
-            print(f"✅ [OCR_MODELS] Model i processor załadowane")
-        except Exception as e:
-            error_msg = f"Błąd ładowania modelu: {str(e)}"
-            print(f"❌ [OCR_MODELS] {error_msg}")
-            return f"[Błąd ładowania modelu: {str(e)}]"
+    # Załaduj model i processor
+    print(f"🔍 [OCR_MODELS] Ładowanie modelu i procesora...")
+    try:
+        model, processor = get_ocr_model()
+        print(f"✅ [OCR_MODELS] Model i processor załadowane")
+    except Exception as e:
+        error_msg = f"Błąd ładowania modelu: {str(e)}"
+        print(f"❌ [OCR_MODELS] {error_msg}")
+        return f"[Błąd ładowania modelu: {str(e)}]"
 
     if isinstance(image_path, Path):
         image_path = str(image_path)
@@ -279,19 +472,32 @@ def process_image_to_text(
         preprocessed_image_path = str(image_path)
 
     try:
-        messages = [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": "You are OCR system for text recognition."}],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image", "image": image_path},
-                    {"type": "text", "text": instruction},
-                ],
-            },
-        ]
+        if OCR_MODEL_TYPE == "dots":
+            # DOTS format (without system message)
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": image_path},
+                        {"type": "text", "text": instruction},
+                    ],
+                },
+            ]
+        else:
+            # Qwen format (with system message)
+            messages = [
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": "You are OCR system for text recognition."}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": image_path},
+                        {"type": "text", "text": instruction},
+                    ],
+                },
+            ]
 
         print(f"🔍 [OCR_MODELS] Przetwarzanie wiadomości...")
         text_prompt = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -304,23 +510,66 @@ def process_image_to_text(
             videos=video_inputs,
             padding=True,
             return_tensors="pt",
-        ).to(model.device)
+        )
 
-        print(f"🔍 [OCR_MODELS] Model device: {model.device}, inputs device: {inputs['pixel_values'].device}")
-        logger.debug("model=%s pixels=%s", model.device, inputs["pixel_values"].device)
+        # Handle device placement for inputs
+        if OCR_MODEL_TYPE == "dots":
+            # DOTS model - get device from model parameters
+            try:
+                target_device = next(model.parameters()).device
+                inputs = inputs.to(target_device)
+                print(f"🔍 [OCR_MODELS] DOTS inputs moved to: {target_device}")
+            except Exception as device_error:
+                print(f"⚠️ [OCR_MODELS] DOTS device placement failed: {device_error}")
+                # Fallback to cuda:0
+                target_device = "cuda:0"
+                inputs = inputs.to(target_device)
+                print(f"🔍 [OCR_MODELS] DOTS fallback to: {target_device}")
+        else:
+            # Qwen model - handle multi-GPU device placement
+            try:
+                # Try to get the device of the first parameter (works for single GPU)
+                if hasattr(model, 'device'):
+                    target_device = model.device
+                else:
+                    # For multi-GPU models, get device of first parameter
+                    target_device = next(model.parameters()).device
+                
+                inputs = inputs.to(target_device)
+                print(f"🔍 [OCR_MODELS] Qwen inputs moved to device: {target_device}")
+                
+            except Exception as device_error:
+                print(f"⚠️ [OCR_MODELS] Device placement issue: {device_error}")
+                # For multi-GPU models with device_map="auto", don't move inputs
+                # The model will handle device placement internally
+                print(f"🔍 [OCR_MODELS] Using auto device placement for multi-GPU")
 
         print(f"🔍 [OCR_MODELS] Rozpoczynam generację tekstu...")
         signal.signal(signal.SIGALRM, _timeout_handler)
-        signal.alarm(OCR_TIMEOUT_SECONDS)
+        signal.alarm(timeout_seconds)
         try:
             logger.info("Instrukcja: %s", instruction)
             with torch.no_grad():
-                gen_ids = model.generate(
-                    **inputs,
-                    max_new_tokens=MAX_NEW_TOKENS
-                    # eos_token_id=processor.tokenizer.eos_token_id,
-                    # pad_token_id=processor.tokenizer.pad_token_id,
-                )
+                if OCR_MODEL_TYPE == "dots":
+                    # DOTS-specific generation parameters - optimized for speed without limiting output
+                    gen_ids = model.generate(
+                        **inputs,
+                        max_new_tokens=MAX_NEW_TOKENS,  # Keep full capacity for large texts
+                        do_sample=False,  # Deterministic output
+                        num_beams=1,  # Faster than beam search
+                        early_stopping=True,
+                        pad_token_id=processor.tokenizer.eos_token_id,
+                        eos_token_id=processor.tokenizer.eos_token_id,
+                        use_cache=True,  # Enable KV cache for speed
+                    )
+                else:
+                    # Qwen generation parameters
+                    gen_ids = model.generate(
+                        **inputs,
+                        max_new_tokens=MAX_NEW_TOKENS
+                        # eos_token_id=processor.tokenizer.eos_token_id,
+                        # pad_token_id=processor.tokenizer.pad_token_id,
+                    )
             print(f"✅ [OCR_MODELS] Generacja zakończona pomyślnie")
         except torch.cuda.OutOfMemoryError as oom_error:
             # Fallback mechanism - try with smaller image if OOM occurs
@@ -393,18 +642,48 @@ def process_image_to_text(
                 logger.error(f"Fallback też się nie udał: {str(fallback_error)}")
                 return f"[Błąd OCR: CUDA out of memory. Tried to allocate memory for image processing. Both original and fallback attempts failed.]"
         except TimeoutError:
-            error_msg = f"Timeout > {OCR_TIMEOUT_SECONDS} s – pominięto stronę"
+            error_msg = f"Timeout > {timeout_seconds} s – pominięto stronę"
             print(f"⏰ [OCR_MODELS] {error_msg}")
             logger.error(error_msg)
-            return f"[Timeout OCR]"
+            raise TimeoutError(error_msg)  # Re-raise to allow fallback logic to catch it
         finally:
             signal.alarm(0)
 
         print(f"🔍 [OCR_MODELS] Dekodowanie wyników...")
-        trimmed = [o[len(i):] for i, o in zip(inputs.input_ids, gen_ids)]
-        text = processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=True)[0]
+        try:
+            if OCR_MODEL_TYPE == "dots":
+                # DOTS-specific decoding
+                trimmed = [o[len(i):] for i, o in zip(inputs.input_ids, gen_ids)]
+                text = processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+                print(f"🔍 [OCR_MODELS] DOTS decoded text length: {len(text)}")
+                
+                # Additional validation for DOTS output
+                if len(text.strip()) == 0:
+                    print(f"⚠️ [OCR_MODELS] DOTS returned empty text, trying different decode...")
+                    # Try alternative decoding
+                    full_text = processor.batch_decode(gen_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+                    # Find the part after the instruction
+                    if "Extract the text content from this image." in full_text:
+                        text = full_text.split("Extract the text content from this image.")[-1].strip()
+                        print(f"🔍 [OCR_MODELS] Alternative decode found: {len(text)} chars")
+            else:
+                # Qwen decoding
+                trimmed = [o[len(i):] for i, o in zip(inputs.input_ids, gen_ids)]
+                text = processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=True)[0]
 
-        print(f"✅ [OCR_MODELS] OCR zakończony, długość tekstu: {len(text)}")
+            print(f"✅ [OCR_MODELS] OCR zakończony, długość tekstu: {len(text)}")
+            
+            # Debug: Show first 200 characters of result
+            if len(text) > 0:
+                preview = text[:200].replace('\n', '\\n')
+                print(f"🔍 [OCR_MODELS] Preview: {preview}...")
+            else:
+                print(f"⚠️ [OCR_MODELS] WARNING: Empty text result!")
+                
+        except Exception as decode_error:
+            print(f"❌ [OCR_MODELS] Błąd dekodowania: {str(decode_error)}")
+            logger.error(f"Błąd dekodowania: {str(decode_error)}")
+            return f"[Błąd dekodowania OCR: {str(decode_error)}]"
 
         # cleanup RAM i GPU memory
         del inputs, gen_ids, image_inputs, video_inputs
@@ -427,6 +706,9 @@ def process_image_to_text(
 
         return text.strip()
 
+    except TimeoutError:
+        # Re-raise TimeoutError to allow fallback logic to handle it
+        raise
     except Exception as e:
         error_msg = f"Błąd podczas OCR: {str(e)}"
         print(f"❌ [OCR_MODELS] {error_msg}")

@@ -43,7 +43,7 @@
         <div class="card-body p-0 position-relative">
           <!-- OCR Viewer Container -->
 
-            <div id="imageContainer" style="height: 800px; position: relative; overflow: auto; display: flex; justify-content: center; align-items: center;">
+            <div id="imageContainer" style="height: 800px; position: relative; overflow: auto; display: flex; justify-content: center; align-items: flex-start;">
               <div id="imageWrapper" style="position: relative; display: inline-block;">
                 <img id="mainImage" src="{{ url_for('document_preview', doc_id=doc.id) }}"
                      alt="{{ doc.original_filename }}"

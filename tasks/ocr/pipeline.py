@@ -34,7 +34,7 @@ from pathlib import Path
 from app.db import FILES_DIR
 
 # Importujemy funkcje z innych modułów OCR
-from .models import process_image_to_text
+from .models import process_image_to_text, process_image_to_text_with_fallback
 from .postprocessors import clean_ocr_text, estimate_ocr_confidence
 
 
@@ -165,10 +165,16 @@ def process_single_image(doc_id: int, file_path: Path, filename: str):
         page_text = None
         
         try:
-            page_text = process_image_to_text(preprocessed_image_path)
+            # Użyj nowej funkcji z fallback DOTS → QWEN
+            print(f"🔍 [PROCES] Wywołuję fallback OCR...")
+            page_text = process_image_to_text_with_fallback(
+                preprocessed_image_path, 
+                skip_preprocessing=True  # preprocessing już wykonany
+            )
             print(f"🔍 [PROCES] OCR zwrócił: {len(page_text)} znaków")
             print(f"🔍 [PROCES] Pierwsze 100 znaków: {page_text[:100]}")
         except Exception as ocr_error:
+            print(f"🔍 [PROCES] Exception w OCR pipeline: {type(ocr_error).__name__}: {str(ocr_error)}")
             # Sprawdź czy to błąd pamięci CUDA
             if "CUDA out of memory" in str(ocr_error) or "OutOfMemoryError" in str(ocr_error):
                 print(f"⚠️ [PROCES] Błąd pamięci GPU, próbuję mniejszy rozmiar obrazu...")
@@ -187,7 +193,10 @@ def process_single_image(doc_id: int, file_path: Path, filename: str):
                 
                 try:
                     fallback_preprocessed = preprocess_image(str(file_path))
-                    page_text = process_image_to_text(fallback_preprocessed)
+                    page_text = process_image_to_text_with_fallback(
+                        fallback_preprocessed,
+                        skip_preprocessing=True  # preprocessing już wykonany
+                    )
                     print(f"✅ [PROCES] Fallback OCR zakończony pomyślnie: {len(page_text)} znaków")
                     
                     # Oczyść fallback file
@@ -270,8 +279,8 @@ def process_pdf_document(doc_id: int, file_path: Path, filename: str):
             # Wyczyść CUDA przed każdą stroną
             ensure_cuda_cleanup()
 
-            # OCR strony
-            page_text = process_image_to_text(img_path)
+            # OCR strony z fallback DOTS → QWEN
+            page_text = process_image_to_text_with_fallback(img_path)
             clean_text = clean_ocr_text(page_text)
             confidence = estimate_ocr_confidence(clean_text)
 

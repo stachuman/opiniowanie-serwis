@@ -54,8 +54,8 @@ def get_ocr_executor():
             logger.warning(
                 f"⚠️ [BACKGROUND] UWAGA: Używam '{current_method}' zamiast 'spawn' - może powodować problemy z CUDA")
 
-        # Użyj max 2 procesy dla OCR żeby nie przeciążyć serwera
-        max_workers = min(3, mp.cpu_count())
+        # Użyj max32 procesy dla OCR żeby nie przeciążyć serwera
+        max_workers = 3
         ocr_executor = ProcessPoolExecutor(max_workers=max_workers)
         logger.info(
             f"✅ [BACKGROUND] Utworzono ProcessPoolExecutor dla OCR z {max_workers} procesami (method: {current_method})")

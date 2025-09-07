@@ -4,8 +4,8 @@
 
 import os, torch
 from functools import lru_cache
-from transformers import AutoModelForVision2Seq, AutoProcessor
-from .config import OCR_MODEL_PATH, logger
+from transformers import AutoModelForVision2Seq, AutoModelForCausalLM, AutoProcessor
+from .config import OCR_MODEL_PATH, OCR_MODEL_TYPE, logger
 import pynvml
 from .config import (
     GPU_MEM_LIMIT_GB
@@ -85,14 +85,22 @@ def get_model():
         print(f"🔍 [OCR_MODELS_SINGLE] Model path istnieje: {OCR_MODEL_PATH}")
         logger.info(f"OLD get_model! Loading to {device}")
 
-        print(f"🔄 [OCR_MODELS_SINGLE] Ładowanie modelu...")
-        model = AutoModelForVision2Seq.from_pretrained(
-            OCR_MODEL_PATH,
-            torch_dtype=torch.float16
-        ).to(device).eval()
+        print(f"🔄 [OCR_MODELS_SINGLE] Ładowanie modelu {OCR_MODEL_TYPE}...")
+        if OCR_MODEL_TYPE == "dots":
+            model = AutoModelForCausalLM.from_pretrained(
+                OCR_MODEL_PATH,
+                attn_implementation="flash_attention_2",
+                torch_dtype=torch.bfloat16,
+                trust_remote_code=True
+            ).to(device).eval()
+        else:
+            model = AutoModelForVision2Seq.from_pretrained(
+                OCR_MODEL_PATH,
+                torch_dtype=torch.float16
+            ).to(device).eval()
 
         print(f"🔄 [OCR_MODELS_SINGLE] Ładowanie procesora...")
-        proc = AutoProcessor.from_pretrained(OCR_MODEL_PATH)
+        proc = AutoProcessor.from_pretrained(OCR_MODEL_PATH, trust_remote_code=True)
 
         print(f"✅ [OCR_MODELS_SINGLE] Model załadowany pomyślnie na {device}")
         logger.info(f"OCR model loaded once on {device}")

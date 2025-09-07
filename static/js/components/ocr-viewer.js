@@ -192,7 +192,7 @@ class OcrViewer {
         if (this.elements.imageContainer) {
             this.elements.imageContainer.style.display = 'flex';
             this.elements.imageContainer.style.justifyContent = 'center';
-            this.elements.imageContainer.style.alignItems = 'center';
+            this.elements.imageContainer.style.alignItems = 'flex-start';
         }
     }
 
