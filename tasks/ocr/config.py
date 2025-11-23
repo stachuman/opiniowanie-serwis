@@ -52,13 +52,13 @@ def setup_logger():
 logger = setup_logger()
 
 # Ustawienia dla timeout'ów
-DOTS_TIMEOUT_SECONDS = 300  # 5 min dla DOTS
+DOTS_TIMEOUT_SECONDS = 200  # 
 QWEN_TIMEOUT_SECONDS = 600  # 10 min dla Qwen
 OCR_TIMEOUT_SECONDS = DOTS_TIMEOUT_SECONDS if OCR_MODEL_TYPE == "dots" else QWEN_TIMEOUT_SECONDS
 WATCHDOG_TIMEOUT_SECONDS = 1800  # 30 minut na cały dokument
 
 # Timeout dla fallback DOTS → QWEN (50% normalnego timeout dla DOTS)
-DOTS_FALLBACK_TIMEOUT_SECONDS = 300
+DOTS_FALLBACK_TIMEOUT_SECONDS = 200
 
 # Ustawienia dla preprocessingu
 DPI = 300  # Rozdzielczość przy konwersji PDF -> obraz

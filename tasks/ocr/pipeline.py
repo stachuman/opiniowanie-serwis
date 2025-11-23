@@ -238,29 +238,213 @@ def process_single_image(doc_id: int, file_path: Path, filename: str):
     return clean_text, confidence
 
 
-def process_pdf_document(doc_id: int, file_path: Path, filename: str):
-    """Przetwarzanie dokumentu PDF (wielostronicowe)."""
-    print(f"📄 [PROCES] PDF: {filename}")
+def process_single_page_with_gpu(page_data: dict) -> dict:
+    """
+    Process single page in separate process with explicit GPU assignment.
+    
+    Args:
+        page_data: {
+            'img_path': str,
+            'page_number': int,
+            'doc_id': int,
+            'total_pages': int,
+            'assigned_gpu': int
+        }
+    
+    Returns:
+        dict: {
+            'page_number': int,
+            'text': str, 
+            'confidence': float,
+            'success': bool,
+            'error': str (if failed)
+        }
+    """
+    img_path = page_data['img_path']
+    page_number = page_data['page_number']
+    doc_id = page_data['doc_id']
+    assigned_gpu = page_data['assigned_gpu']
+    
+    try:
+        print(f"🔍 [PAGE_WORKER] Processing page {page_number} in PID {os.getpid()} on GPU {assigned_gpu}")
+        
+        # Set GPU assignment for this process
+        ensure_cuda_cleanup()
+        
+        print(f"🎯 [PAGE_WORKER] Using assigned GPU {assigned_gpu} for page {page_number}")
+        
+        # OCR processing with explicitly assigned GPU
+        page_text = process_image_to_text_with_fallback(img_path, assigned_gpu=assigned_gpu)
+        clean_text = clean_ocr_text(page_text)
+        confidence = estimate_ocr_confidence(clean_text)
+        
+        print(f"✅ [PAGE_WORKER] Page {page_number} on GPU {assigned_gpu}: {len(clean_text)} chars, confidence: {confidence:.2f}")
+        
+        return {
+            'page_number': page_number,
+            'text': clean_text,
+            'confidence': confidence,
+            'success': True,
+            'error': None
+        }
+        
+    except Exception as e:
+        error_msg = f"Page {page_number} OCR error: {str(e)}"
+        print(f"❌ [PAGE_WORKER] {error_msg}")
+        
+        return {
+            'page_number': page_number,
+            'text': f"[{error_msg}]",
+            'confidence': 0.0,
+            'success': False,
+            'error': str(e)
+        }
+        
+    finally:
+        # Cleanup temp file and GPU memory
+        if os.path.exists(img_path):
+            os.remove(img_path)
+        ensure_cuda_cleanup()
 
-    update_document_status(doc_id, "running", "Konwersja PDF na obrazy", 0.1)
 
-    # Konwertuj PDF na obrazy
-    from pdf2image import convert_from_path
-    pages = convert_from_path(str(file_path), dpi=200)
-    total_pages = len(pages)
-
-    update_document_status(doc_id, "running", f"Wykryto {total_pages} stron", 0.2, total_pages=total_pages)
-
-    print(f"📄 [PROCES] Wykryto {total_pages} stron")
-
-    # Przetwarzaj każdą stronę
+def process_pages_parallel(doc_id: int, pages: list, gpu_ids: list[int], total_pages: int) -> tuple:
+    """
+    Process PDF pages in parallel using ProcessPoolExecutor with explicit GPU assignment.
+    
+    Args:
+        doc_id: Document ID for progress tracking
+        pages: List of PIL Image objects
+        gpu_ids: List of GPU IDs to assign to workers
+        total_pages: Total page count
+        
+    Returns:
+        tuple: (combined_text, average_confidence)
+    """
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    import tempfile
+    
+    max_workers = len(gpu_ids)
+    print(f"🚀 [PARALLEL] Starting parallel processing: {max_workers} workers for {total_pages} pages")
+    print(f"🔍 [PARALLEL] GPU assignments: {gpu_ids}")
+    
+    # Pre-allocate results to maintain page order
+    page_results = [None] * total_pages
+    completed_count = 0
+    
+    # Prepare page data for worker processes with GPU assignments
+    page_tasks = []
+    temp_files = []
+    
+    for page_number, img in enumerate(pages, 1):
+        # Save page image to temporary file
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
+            img_path = tmp_img.name
+            temp_files.append(img_path)
+        
+        img.save(img_path, "PNG")
+        
+        # Assign GPU in round-robin fashion
+        assigned_gpu = gpu_ids[(page_number - 1) % len(gpu_ids)]
+        
+        page_tasks.append({
+            'img_path': img_path,
+            'page_number': page_number,
+            'doc_id': doc_id,
+            'total_pages': total_pages,
+            'assigned_gpu': assigned_gpu
+        })
+        
+        print(f"🔍 [PARALLEL] Page {page_number} → GPU {assigned_gpu}")
+    
+    try:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all page tasks
+            future_to_page = {}
+            for page_data in page_tasks:
+                future = executor.submit(process_single_page_with_gpu, page_data)
+                future_to_page[future] = page_data['page_number']
+            
+            # Collect results as they complete (out of order)
+            for future in as_completed(future_to_page):
+                page_number = future_to_page[future]
+                
+                try:
+                    result = future.result()
+                    page_results[page_number - 1] = result  # Store in correct position
+                    completed_count += 1
+                    
+                    # Update progress - show completion count, not page number
+                    progress = 0.2 + (0.7 * completed_count / total_pages)
+                    update_document_status(
+                        doc_id, "running",
+                        f"Ukończono {completed_count}/{total_pages} stron (parallel)",
+                        progress, current_page=completed_count, total_pages=total_pages
+                    )
+                    
+                    print(f"📊 [PARALLEL] Progress: {completed_count}/{total_pages} pages completed")
+                    
+                except Exception as e:
+                    # Handle individual page failure
+                    print(f"❌ [PARALLEL] Page {page_number} failed: {str(e)}")
+                    page_results[page_number - 1] = {
+                        'page_number': page_number,
+                        'text': f"[Błąd OCR dla strony {page_number}: {str(e)}]",
+                        'confidence': 0.0,
+                        'success': False,
+                        'error': str(e)
+                    }
+                    completed_count += 1
+    
+    finally:
+        # Cleanup all temporary files
+        for temp_file in temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception as cleanup_error:
+                print(f"⚠️ [PARALLEL] Cleanup error: {cleanup_error}")
+    
+    # Assemble results in correct page order
     page_texts = []
     confidence_scores = []
+    
+    for result in page_results:
+        if result:
+            page_texts.append(result['text'])
+            confidence_scores.append(result['confidence'])
+        else:
+            page_texts.append("[Błąd: brak wyniku OCR]")
+            confidence_scores.append(0.0)
+    
+    # Combine text with page markers (same format as sequential)
+    text_all = ""
+    for i, page_text in enumerate(page_texts, 1):
+        text_all += f"\n\n=== Strona {i} ===\n\n{page_text}"
+    
+    text_all = text_all.strip()
+    
+    # Calculate average confidence
+    avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
+    
+    print(f"✅ [PARALLEL] Completed: {len(text_all)} chars, avg confidence: {avg_confidence:.2f}")
+    
+    return text_all, avg_confidence
 
+
+def process_pages_sequential(doc_id: int, pages: list, total_pages: int) -> tuple:
+    """
+    Sequential page processing - extracted from original logic.
+    Used as fallback when parallel processing not available.
+    """
+    print(f"📄 [SEQUENTIAL] Processing {total_pages} pages sequentially")
+    
+    page_texts = []
+    confidence_scores = []
+    
     for page_number, img in enumerate(pages, 1):
-        print(f"🔍 [PROCES] Strona {page_number}/{total_pages}")
+        print(f"🔍 [SEQUENTIAL] Page {page_number}/{total_pages}")
 
-        # Aktualizuj postęp
+        # Progress tracking (same as original)
         progress = 0.2 + (0.7 * page_number / total_pages)
         update_document_status(
             doc_id, "running",
@@ -268,18 +452,15 @@ def process_pdf_document(doc_id: int, file_path: Path, filename: str):
             progress, current_page=page_number, total_pages=total_pages
         )
 
-        # Zapisz obraz do pliku tymczasowego
+        # Save to temp file (same as original)
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
             img_path = tmp_img.name
 
         try:
-            # Zapisz i przetwórz stronę
             img.save(img_path, "PNG")
-
-            # Wyczyść CUDA przed każdą stroną
             ensure_cuda_cleanup()
 
-            # OCR strony z fallback DOTS → QWEN
+            # UNCHANGED: existing OCR logic
             page_text = process_image_to_text_with_fallback(img_path)
             clean_text = clean_ocr_text(page_text)
             confidence = estimate_ocr_confidence(clean_text)
@@ -287,30 +468,64 @@ def process_pdf_document(doc_id: int, file_path: Path, filename: str):
             page_texts.append(clean_text)
             confidence_scores.append(confidence)
 
-            print(f"✅ [PROCES] Strona {page_number}: {len(clean_text)} znaków, pewność: {confidence:.2f}")
+            print(f"✅ [SEQUENTIAL] Page {page_number}: {len(clean_text)} chars, confidence: {confidence:.2f}")
 
         except Exception as e:
-            print(f"❌ [PROCES] Błąd OCR strony {page_number}: {str(e)}")
+            print(f"❌ [SEQUENTIAL] Page {page_number} error: {str(e)}")
             page_texts.append(f"[Błąd OCR dla strony {page_number}: {str(e)}]")
             confidence_scores.append(0.0)
 
         finally:
-            # Usuń plik tymczasowy
             if os.path.exists(img_path):
                 os.remove(img_path)
-
-            # Wyczyść pamięć po każdej stronie
             ensure_cuda_cleanup()
 
-    # Połącz teksty stron
+    # Assemble results (same as original)
     text_all = ""
     for i, page_text in enumerate(page_texts, 1):
         text_all += f"\n\n=== Strona {i} ===\n\n{page_text}"
 
     text_all = text_all.strip()
-
-    # Oblicz średnią pewność
     avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
+
+    return text_all, avg_confidence
+
+
+def process_pdf_document(doc_id: int, file_path: Path, filename: str):
+    """
+    Enhanced PDF processing with adaptive parallel/sequential page handling.
+    """
+    print(f"📄 [PROCESS] PDF: {filename}")
+
+    update_document_status(doc_id, "running", "Konwersja PDF na obrazy", 0.1)
+
+    # UNCHANGED: PDF conversion
+    from pdf2image import convert_from_path
+    pages = convert_from_path(str(file_path), dpi=200)
+    total_pages = len(pages)
+
+    update_document_status(doc_id, "running", f"Wykryto {total_pages} stron", 0.2, total_pages=total_pages)
+    print(f"📄 [PROCESS] Wykryto {total_pages} stron")
+
+    # NEW: Adaptive processing strategy with explicit GPU assignment
+    available_gpu_ids = get_available_gpus_for_ocr()
+    max_parallel_pages = min(len(available_gpu_ids), total_pages)
+    
+    print(f"🔍 [PROCESS] Available GPUs: {available_gpu_ids}, Max parallel: {max_parallel_pages}")
+
+    if max_parallel_pages <= 1 or total_pages == 1:
+        # Use sequential processing
+        print(f"📄 [PROCESS] Using sequential processing")
+        text_all, avg_confidence = process_pages_sequential(doc_id, pages, total_pages)
+    else:
+        # Use parallel processing with explicit GPU assignments
+        print(f"🚀 [PROCESS] Using parallel processing with {max_parallel_pages} workers on GPUs: {available_gpu_ids[:max_parallel_pages]}")
+        try:
+            text_all, avg_confidence = process_pages_parallel(doc_id, pages, available_gpu_ids[:max_parallel_pages], total_pages)
+        except Exception as e:
+            print(f"❌ [PROCESS] Parallel processing failed: {str(e)}")
+            print(f"🔄 [PROCESS] Falling back to sequential processing")
+            text_all, avg_confidence = process_pages_sequential(doc_id, pages, total_pages)
 
     return text_all, avg_confidence
 
@@ -432,6 +647,71 @@ def embed_text_in_pdf(pdf_path: Path):
 
 
 # ==================== FUNKCJE POMOCNICZE ====================
+
+def get_available_gpus_for_ocr() -> list[int]:
+    """
+    Get list of GPUs available for OCR processing with explicit GPU IDs.
+    
+    Returns:
+        list[int]: List of GPU IDs that have sufficient memory
+    """
+    try:
+        import torch
+        import pynvml
+        from tasks.ocr.config import GPU_MEM_LIMIT_GB
+        
+        available_gpu_ids = []
+        
+        if not torch.cuda.is_available():
+            print(f"⚠️ [GPU_SELECT] CUDA not available")
+            return [0]  # Return GPU 0 as fallback
+        
+        gpu_limit = GPU_MEM_LIMIT_GB
+        print(f"🔍 [GPU_SELECT] GPU memory limit: {gpu_limit}GB")
+        
+        total_gpus = torch.cuda.device_count()
+        print(f"🔍 [GPU_SELECT] Testing {total_gpus} GPUs with {gpu_limit}GB threshold...")
+        
+        pynvml.nvmlInit()
+        
+        for gpu_id in range(total_gpus):
+            try:
+                free, total = torch.cuda.mem_get_info(gpu_id)
+                free_gb = free / (1024 ** 3)
+                total_gb = total / (1024 ** 3)
+                
+                print(f"🔍 [GPU_SELECT] GPU {gpu_id}: {free_gb:.2f}GB free / {total_gb:.2f}GB total")
+                
+                if free_gb >= gpu_limit:
+                    available_gpu_ids.append(gpu_id)
+                    print(f"✅ [GPU_SELECT] GPU {gpu_id} available ({free_gb:.2f}GB >= {gpu_limit}GB)")
+                else:
+                    print(f"❌ [GPU_SELECT] GPU {gpu_id} insufficient memory ({free_gb:.2f}GB < {gpu_limit}GB)")
+                    
+            except Exception as gpu_error:
+                print(f"⚠️ [GPU_SELECT] Error checking GPU {gpu_id}: {gpu_error}")
+                
+        pynvml.nvmlShutdown()
+        
+        if not available_gpu_ids:
+            print(f"⚠️ [GPU_SELECT] No GPUs meet memory requirements, using GPU 0 as fallback")
+            return [0]
+        
+        print(f"🔍 [GPU_SELECT] Available GPU IDs: {available_gpu_ids}")
+        return available_gpu_ids
+        
+    except Exception as e:
+        print(f"⚠️ [GPU_SELECT] Error getting available GPUs: {e}")
+        print(f"🔍 [GPU_SELECT] Falling back to GPU 0")
+        return [0]
+
+
+def count_available_gpus_for_ocr() -> int:
+    """
+    Legacy function - returns count of available GPUs.
+    """
+    return len(get_available_gpus_for_ocr())
+
 
 def get_db_path() -> Path:
     """Zwraca ścieżkę do bazy danych."""

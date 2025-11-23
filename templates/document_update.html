@@ -108,12 +108,12 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
 
-    // Sprawdź rozmiar (max 50MB)
-    const maxSize = 50 * 1024 * 1024; // 50MB
+    // Sprawdź rozmiar (max 100MB)
+    const maxSize = 100 * 1024 * 1024; // 100MB
     if (file.size > maxSize) {
-      this.setCustomValidity('Plik jest zbyt duży. Maksymalny rozmiar to 50MB');
+      this.setCustomValidity('Plik jest zbyt duży. Maksymalny rozmiar to 100MB');
       this.classList.add('is-invalid');
-      fileValidation.textContent = 'Plik jest zbyt duży. Maksymalny rozmiar to 50MB';
+      fileValidation.textContent = 'Plik jest zbyt duży. Maksymalny rozmiar to 100MB';
       return;
     }
 

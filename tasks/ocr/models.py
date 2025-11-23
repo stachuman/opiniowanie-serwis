@@ -116,7 +116,7 @@ def _pick_best_gpu(threshold_gb: int) -> int | None:
 # ---------------------------------------------------------------------------
 
 @lru_cache(maxsize=4)
-def _load_once(model_type: str, model_path: str) -> Tuple[Any, AutoProcessor]:
+def _load_once(model_type: str, model_path: str, assigned_gpu: int = None) -> Tuple[Any, AutoProcessor]:
     """Ładuje model OCR - raz na proces, z cache bazującym na typie modelu."""
     print(f"🔄 [OCR_MODELS] Ładowanie modelu {model_type} w procesie PID={os.getpid()}")
     logger.info(f"🔄 [OCR_MODELS] Ładowanie modelu {model_type} w procesie PID={os.getpid()}")
@@ -148,17 +148,32 @@ def _load_once(model_type: str, model_path: str) -> Tuple[Any, AutoProcessor]:
             raise Exception(f"Model nie istnieje lokalnie ani w HF Hub: {model_path}")
 
         strategy = CFG_STRATEGY
-
-        if strategy == "single" and GPU_SELECT_MODE == "auto":
-            gpu = _pick_best_gpu(GPU_MEM_LIMIT_GB)
-            if gpu is None:
-                logger.warning("Brak karty ≥%s GB – przełączam na device_map='auto'", GPU_MEM_LIMIT_GB)
-                strategy = "auto"
-                gpu = 0
+        
+        # Model-aware device strategy
+        if assigned_gpu is not None:
+            print(f"🎯 [OCR_MODELS] Using explicitly assigned GPU: {assigned_gpu}")
+            gpu = assigned_gpu
+            
+            # DOTS: Single GPU (can fit on one GPU)
+            # QWEN: Multi-GPU (needs distribution across multiple GPUs)
+            if model_type == "dots":
+                strategy = "single"  # Force single GPU for DOTS
+                print(f"🔍 [OCR_MODELS] DOTS model: forcing single GPU strategy")
+            else:
+                strategy = "auto"  # Allow multi-GPU for QWEN
+                print(f"🔍 [OCR_MODELS] QWEN model: allowing multi-GPU strategy")
         else:
-            gpu = 0
+            # Original GPU selection logic for main process
+            if strategy == "single" and GPU_SELECT_MODE == "auto":
+                gpu = _pick_best_gpu(GPU_MEM_LIMIT_GB)
+                if gpu is None:
+                    logger.warning("Brak karty ≥%s GB – przełączam na device_map='auto'", GPU_MEM_LIMIT_GB)
+                    strategy = "auto"
+                    gpu = 0
+            else:
+                gpu = 0
 
-        print(f"🔍 [OCR_MODELS] Wybrano GPU: {gpu}, strategy: {strategy}")
+        print(f"🔍 [OCR_MODELS] Wybrano GPU: {gpu}, strategy: {strategy}, model: {model_type}")
 
         # Sprawdź pamięć GPU przed ładowaniem
         try:
@@ -188,10 +203,12 @@ def _load_once(model_type: str, model_path: str) -> Tuple[Any, AutoProcessor]:
             params: Dict[str, Any] = {"torch_dtype": torch.float16, "trust_remote_code": True}
             
             if strategy == "single":
-                params["device_map"] = gpu
+                params["device_map"] = f"cuda:{gpu}"
                 params["max_memory"] = {gpu: f"{GPU_MEM_LIMIT_GB}GiB"}
+                print(f"🔍 [OCR_MODELS] QWEN single GPU mode: cuda:{gpu}")
             else:
                 params["device_map"] = "auto"
+                print(f"🔍 [OCR_MODELS] QWEN multi-GPU mode: device_map=auto")
 
         print(f"🔍 [OCR_MODELS] Parametry ładowania: {params}")
         logger.info("Ładowanie modelu z parametrami: %s", params)
@@ -230,14 +247,16 @@ def _load_once(model_type: str, model_path: str) -> Tuple[Any, AutoProcessor]:
         raise Exception(f"Nie można załadować modelu OCR: {str(e)}")
 
 
-def get_ocr_model() -> Tuple[Any, AutoProcessor]:
+def get_ocr_model(assigned_gpu: int = None) -> Tuple[Any, AutoProcessor]:
     """Publiczny interfejs do pobierania modelu OCR."""
     print(f"🔍 [OCR_MODELS] get_ocr_model wywołane w procesie PID={os.getpid()}")
+    if assigned_gpu is not None:
+        print(f"🎯 [OCR_MODELS] Using explicitly assigned GPU: {assigned_gpu}")
     try:
         # Import current config values to get the most up-to-date configuration
         from .config import OCR_MODEL_TYPE, OCR_MODEL_PATH
         print(f"🔍 [OCR_MODELS] Current config: {OCR_MODEL_TYPE} @ {OCR_MODEL_PATH}")
-        return _load_once(OCR_MODEL_TYPE, OCR_MODEL_PATH)
+        return _load_once(OCR_MODEL_TYPE, OCR_MODEL_PATH, assigned_gpu)
     except Exception as e:
         print(f"❌ [OCR_MODELS] Błąd w get_ocr_model: {str(e)}")
         raise
@@ -255,6 +274,7 @@ def process_image_to_text_with_fallback(
         image_path: str | Path,
         instruction: str = DEFAULT_OCR_INSTRUCTION,
         skip_preprocessing=False,
+        assigned_gpu: int = None,
 ):
     """
     Rozpoznaje tekst z obrazu z fallback DOTS → QWEN.
@@ -277,7 +297,8 @@ def process_image_to_text_with_fallback(
                 model_type="dots",
                 model_path=DOTS_MODEL_PATH,
                 timeout_seconds=DOTS_FALLBACK_TIMEOUT_SECONDS,
-                skip_preprocessing=skip_preprocessing
+                skip_preprocessing=skip_preprocessing,
+                assigned_gpu=assigned_gpu
             )
             print(f"✅ [OCR_MODELS] DOTS zakończony pomyślnie: {len(result)} znaków")
             return result
@@ -295,7 +316,8 @@ def process_image_to_text_with_fallback(
                     model_type="qwen",
                     model_path=QWEN_MODEL_PATH,
                     timeout_seconds=QWEN_TIMEOUT_SECONDS,
-                    skip_preprocessing=skip_preprocessing
+                    skip_preprocessing=skip_preprocessing,
+                    assigned_gpu=assigned_gpu
                 )
                 print(f"✅ [OCR_MODELS] QWEN fallback zakończony pomyślnie: {len(result)} znaków")
                 return result
@@ -317,7 +339,8 @@ def process_image_to_text_with_fallback(
         return process_image_to_text(
             image_path=image_path,
             instruction=instruction,
-            skip_preprocessing=skip_preprocessing
+            skip_preprocessing=skip_preprocessing,
+            assigned_gpu=assigned_gpu
         )
 
 
@@ -328,6 +351,7 @@ def process_image_to_text_internal(
         model_path: str,
         timeout_seconds: int,
         skip_preprocessing=False,
+        assigned_gpu: int = None,
 ):
     """Wewnętrzna funkcja OCR z określonym modelem i timeout."""
     print(f"🔍 [OCR_MODELS] process_image_to_text_internal: {model_type} @ {image_path}")
@@ -356,7 +380,8 @@ def process_image_to_text_internal(
             image_path=image_path,
             instruction=instruction,
             timeout_seconds=timeout_seconds,
-            skip_preprocessing=skip_preprocessing
+            skip_preprocessing=skip_preprocessing,
+            assigned_gpu=assigned_gpu
         )
         
         return result
@@ -378,6 +403,7 @@ def process_image_to_text(
         model=None,
         processor=None,
         skip_preprocessing=False,
+        assigned_gpu: int = None,
 ):
     """Rozpoznaje tekst z obrazu i zwraca go jako string."""
     try:
@@ -385,7 +411,8 @@ def process_image_to_text(
             image_path=image_path,
             instruction=instruction,
             timeout_seconds=OCR_TIMEOUT_SECONDS,
-            skip_preprocessing=skip_preprocessing
+            skip_preprocessing=skip_preprocessing,
+            assigned_gpu=assigned_gpu
         )
     except TimeoutError as e:
         # For backwards compatibility, return timeout as text
@@ -398,6 +425,7 @@ def process_image_to_text_core(
         instruction: str = DEFAULT_OCR_INSTRUCTION,
         timeout_seconds: int = OCR_TIMEOUT_SECONDS,
         skip_preprocessing=False,
+        assigned_gpu: int = None,
 ):
     """Podstawowa funkcja OCR - wydzielona logika z process_image_to_text."""
     print(f"🔍 [OCR_MODELS] process_image_to_text_core dla: {image_path} (timeout: {timeout_seconds}s)")
@@ -429,7 +457,7 @@ def process_image_to_text_core(
     # Załaduj model i processor
     print(f"🔍 [OCR_MODELS] Ładowanie modelu i procesora...")
     try:
-        model, processor = get_ocr_model()
+        model, processor = get_ocr_model(assigned_gpu=assigned_gpu)
         print(f"✅ [OCR_MODELS] Model i processor załadowane")
     except Exception as e:
         error_msg = f"Błąd ładowania modelu: {str(e)}"

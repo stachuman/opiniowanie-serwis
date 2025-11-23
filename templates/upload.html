@@ -29,7 +29,7 @@
             <div class="col-md-6">
               <p class="mb-1"><strong>Wymagania:</strong></p>
               <ul class="list-unstyled small text-muted">
-                <li>• Maksymalny rozmiar pliku: 50MB</li>
+                <li>• Maksymalny rozmiar pliku: 100MB</li>
                 <li>• Można wybrać wiele plików naraz</li>
                 <li>• Pierwszy plik stanie się opinią główną</li>
               </ul>
@@ -106,14 +106,14 @@ class UploadWordFormManager {
     }
 
     // Sprawdź rozmiar plików
-    const maxSize = 50 * 1024 * 1024; // 50MB
+    const maxSize = 100 * 1024 * 1024; // 100MB
     let totalSize = 0;
 
     for (let file of files) {
       totalSize += file.size;
 
       if (file.size > maxSize) {
-        window.alertManager.error(`Plik ${file.name} jest za duży (max 50MB)`);
+        window.alertManager.error(`Plik ${file.name} jest za duży (max 100MB)`);
         return false;
       }
     }

@@ -163,14 +163,14 @@ class UploadFormManager {
     }
 
     // Sprawdź rozmiar plików
-    const maxSize = 50 * 1024 * 1024; // 50MB
+    const maxSize = 100 * 1024 * 1024; // 100MB
     let totalSize = 0;
 
     for (let file of files) {
       totalSize += file.size;
 
       if (file.size > maxSize) {
-        window.alertManager.error(`Plik ${file.name} jest za duży (max 50MB)`);
+        window.alertManager.error(`Plik ${file.name} jest za duży (max 100MB)`);
         return false;
       }
     }
