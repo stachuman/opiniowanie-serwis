@@ -63,8 +63,14 @@ def get_ocr_executor():
     return ocr_executor
 
 
-async def enqueue_ocr_task(doc_id: int):
-    """Dodaje zadanie OCR do kolejki."""
+async def enqueue_ocr_task(doc_id: int, merge_pages: list = None):
+    """
+    Dodaje zadanie OCR do kolejki.
+
+    Args:
+        doc_id: Document ID to process
+        merge_pages: Optional list of page numbers for merge mode
+    """
     # Sprawdź czy dokument nie jest już przetwarzany
     if doc_id in active_tasks["ocr"]:
         logger.info(f"Dokument {doc_id} jest już w kolejce OCR - pomijam")
@@ -73,9 +79,14 @@ async def enqueue_ocr_task(doc_id: int):
     # Dodaj do aktywnych zadań
     active_tasks["ocr"].add(doc_id)
 
-    # Dodaj do kolejki
-    await task_queues["ocr"].put(doc_id)
-    logger.info(f"Dodano dokument {doc_id} do kolejki OCR")
+    # Dodaj do kolejki jako tuple (doc_id, merge_pages)
+    task_data = (doc_id, merge_pages)
+    await task_queues["ocr"].put(task_data)
+
+    if merge_pages:
+        logger.info(f"Dodano dokument {doc_id} do kolejki OCR (merge: strony {merge_pages})")
+    else:
+        logger.info(f"Dodano dokument {doc_id} do kolejki OCR")
 
     # Natychmiast oddaj kontrolę do pętli zdarzeń
     await asyncio.sleep(0)
@@ -89,13 +100,22 @@ def remove_active_task(queue_name: str, task_id: int):
 
 
 # ✅ NOWE: Synchroniczna funkcja OCR dla ProcessPool
-def run_ocr_in_process(doc_id: int) -> dict:
+def run_ocr_in_process(task_data: tuple) -> dict:
     """
     Synchroniczna funkcja OCR uruchamiana w osobnym procesie.
     UWAGA: Ta funkcja nie może używać asyncio ani SQLModel Session!
+
+    Args:
+        task_data: Tuple of (doc_id, merge_pages) where merge_pages can be None
     """
+    # Unpack task data
+    doc_id, merge_pages = task_data
+
     try:
-        logger.info(f"🔄 [PROCES] Rozpoczynam OCR dla dokumentu {doc_id}")
+        if merge_pages:
+            logger.info(f"🔄 [PROCES] Rozpoczynam merge OCR dla dokumentu {doc_id}, strony: {merge_pages}")
+        else:
+            logger.info(f"🔄 [PROCES] Rozpoczynam OCR dla dokumentu {doc_id}")
 
         # Sprawdź środowisko w procesie worker
         current_method = mp.get_start_method()
@@ -104,8 +124,8 @@ def run_ocr_in_process(doc_id: int) -> dict:
         # ✅ UŻYJ NOWEJ SYNC FUNKCJI z pipeline.py
         from tasks.ocr.pipeline import process_document_sync
 
-        # Wywołaj nową sync wrapper function
-        result = process_document_sync(doc_id)
+        # Wywołaj nową sync wrapper function z merge_pages
+        result = process_document_sync(doc_id, merge_pages=merge_pages)
 
         if result["success"]:
             logger.info(f"✅ [PROCES] OCR zakończony dla dokumentu {doc_id}")
@@ -132,22 +152,28 @@ async def ocr_worker():
 
     while True:
         try:
-            # Pobierz dokument z kolejki (z krótkim timeoutem)
+            # Pobierz zadanie z kolejki (z krótkim timeoutem)
             try:
-                doc_id = await asyncio.wait_for(task_queues["ocr"].get(), timeout=0.1)
+                task_data = await asyncio.wait_for(task_queues["ocr"].get(), timeout=0.1)
             except asyncio.TimeoutError:
                 # Brak zadań w kolejce - oddaj kontrolę do pętli zdarzeń
                 await asyncio.sleep(0.1)
                 continue
 
-            logger.info(f"📤 Przekazuję dokument {doc_id} do procesu OCR")
+            # Unpack task data
+            doc_id, merge_pages = task_data
+
+            if merge_pages:
+                logger.info(f"📤 Przekazuję dokument {doc_id} do procesu OCR (merge: strony {merge_pages})")
+            else:
+                logger.info(f"📤 Przekazuję dokument {doc_id} do procesu OCR")
 
             # ✅ URUCHOM OCR W OSOBNYM PROCESIE (nie blokuje event loop!)
             loop = asyncio.get_event_loop()
             executor = get_ocr_executor()
 
             # Uruchom OCR w osobnym procesie asynchronicznie
-            ocr_future = loop.run_in_executor(executor, run_ocr_in_process, doc_id)
+            ocr_future = loop.run_in_executor(executor, run_ocr_in_process, task_data)
 
             # ✅ NIE CZEKAJ na wynik - uruchom fire-and-forget
             asyncio.create_task(_handle_ocr_result(ocr_future, doc_id))

@@ -37,19 +37,49 @@ class DocumentDetailManager {
   setupEventListeners() {
     document.addEventListener('click', (e) => this.handleGlobalClick(e));
     document.addEventListener('submit', (e) => this.handleFormSubmit(e));
+
+    // Enter key support for merge page input
+    const mergeInput = document.getElementById('mergePageSelection');
+    if (mergeInput) {
+      mergeInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const mergeBtn = document.querySelector('.merge-ocr-btn');
+          if (mergeBtn) {
+            mergeBtn.click();
+          }
+        }
+      });
+      console.log('DocumentDetailManager: Merge input Enter key handler registered');
+    }
   }
 
   /**
    * Obsługa globalnych kliknięć
    */
   handleGlobalClick(e) {
+    // Debug: log all clicks on buttons
+    if (e.target.closest('button')) {
+      console.log('DocumentDetailManager: button clicked', e.target, e.target.closest('button'));
+    }
+
     // Przyciski uruchamiania OCR
     const runOcrBtn = e.target.closest('.run-ocr-btn');
     if (runOcrBtn) {
       console.log('DocumentDetailManager: run-ocr-btn clicked', runOcrBtn);
-      e.preventDefault(); // DODANE: Zapobiegaj domyślnej akcji
-      e.stopPropagation(); // DODANE: Zatrzymaj propagację
+      e.preventDefault();
+      e.stopPropagation();
       this.handleRunOcr(e, runOcrBtn);
+      return;
+    }
+
+    // Przycisk merge OCR
+    const mergeOcrBtn = e.target.closest('.merge-ocr-btn');
+    if (mergeOcrBtn) {
+      console.log('DocumentDetailManager: merge-ocr-btn clicked', mergeOcrBtn);
+      e.preventDefault();
+      e.stopPropagation();
+      this.handleMergeOcr(e, mergeOcrBtn);
       return;
     }
 
@@ -116,7 +146,91 @@ class DocumentDetailManager {
       button.innerHTML = originalHtml;
     }
   }
-  
+
+  /**
+   * Obsługa merge OCR (OCR wybranych stron)
+   */
+  async handleMergeOcr(e, button) {
+    e.preventDefault();
+    console.log('DocumentDetailManager: handleMergeOcr called');
+
+    const docId = button.getAttribute('data-doc-id') || this.docId;
+    const pageInput = document.getElementById('mergePageSelection');
+
+    if (!pageInput) {
+      if (window.alertManager) {
+        window.alertManager.error('Nie znaleziono pola wyboru stron');
+      }
+      return;
+    }
+
+    const pages = pageInput.value.trim();
+
+    if (!pages) {
+      if (window.alertManager) {
+        window.alertManager.warning('Podaj numery stron do przetworzenia (np. 1,3,5-7)');
+      }
+      pageInput.focus();
+      return;
+    }
+
+    // Walidacja formatu po stronie klienta
+    const validPattern = /^[\d,\s\-]+$/;
+    if (!validPattern.test(pages)) {
+      if (window.alertManager) {
+        window.alertManager.error('Nieprawidłowy format. Użyj cyfr, przecinków i myślników (np. 1,3,5-7)');
+      }
+      return;
+    }
+
+    try {
+      // Wyłącz przycisk i pokaż loading
+      button.disabled = true;
+      const originalHtml = button.innerHTML;
+      button.innerHTML = '<i class="bi bi-hourglass-split"></i> ...';
+
+      // Wyślij request
+      const formData = new FormData();
+      formData.append('pages', pages);
+
+      const response = await fetch(`/document/${docId}/run_ocr_merge`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
+      }
+
+      // Pokaż komunikat sukcesu
+      if (window.alertManager) {
+        window.alertManager.success(`Merge OCR uruchomiony dla stron: ${pages}`, {
+          duration: 5000
+        });
+      }
+
+      // Rozpocznij monitorowanie
+      this.startOcrProgressMonitoring();
+
+      // Odśwież stronę po krótkim opóźnieniu
+      setTimeout(() => location.reload(), 2000);
+
+    } catch (error) {
+      console.error('Błąd merge OCR:', error);
+
+      if (window.alertManager) {
+        window.alertManager.error('Nie udało się uruchomić merge OCR: ' + error.message);
+      } else {
+        alert('Błąd merge OCR: ' + error.message);
+      }
+
+      // Przywróć przycisk
+      button.disabled = false;
+      button.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Merge';
+    }
+  }
+
   /**
    * Obsługa odświeżania tekstu OCR
    */

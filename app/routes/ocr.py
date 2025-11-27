@@ -42,6 +42,54 @@ async def document_run_ocr(request: Request, doc_id: int):
     return RedirectResponse(f"{redirect_url}?ocr_restarted=true", status_code=303)
 
 
+@router.post("/document/{doc_id}/run_ocr_merge", name="document_run_ocr_merge")
+async def document_run_ocr_merge(request: Request, doc_id: int):
+    """
+    Endpoint do uruchomienia OCR tylko dla wybranych stron (merge mode).
+    Zachowuje istniejący OCR dla pozostałych stron.
+    """
+    from tasks.ocr.pipeline import parse_page_selection
+
+    # Pobierz dane z formularza
+    form_data = await request.form()
+    pages_str = form_data.get("pages", "")
+
+    if not pages_str or not pages_str.strip():
+        raise HTTPException(status_code=400, detail="Nie podano numerów stron")
+
+    # Parsuj wybór stron
+    try:
+        merge_pages = parse_page_selection(pages_str)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    with Session(engine) as session:
+        doc = session.get(Document, doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
+
+        # Sprawdź czy to PDF
+        if doc.mime_type != "application/pdf":
+            raise HTTPException(
+                status_code=400,
+                detail="Merge OCR jest dostępny tylko dla dokumentów PDF"
+            )
+
+        # Ustaw status
+        doc.ocr_status = "pending"
+        doc.ocr_progress = 0.0
+        doc.ocr_progress_info = f"Merge OCR: strony {pages_str}"
+        session.add(doc)
+        session.commit()
+
+    # Dodaj do kolejki OCR z parametrem merge_pages
+    asyncio.create_task(enqueue_ocr_task(doc_id, merge_pages=merge_pages))
+
+    # Przekieruj z parametrem
+    redirect_url = request.url_for("document_detail", doc_id=doc_id)
+    return RedirectResponse(f"{redirect_url}?ocr_merge_started=true", status_code=303)
+
+
 @router.get("/api/document/{doc_id}/ocr-progress", name="document_ocr_progress")
 def document_ocr_progress(doc_id: int):
     """Zwraca informacje o postępie OCR w formacie JSON."""

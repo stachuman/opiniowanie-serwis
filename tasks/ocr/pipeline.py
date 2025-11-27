@@ -52,19 +52,26 @@ def ensure_cuda_cleanup():
         print(f"⚠️ [PROCES] Błąd czyszczenia CUDA: {e}")
 
 
-def process_document_sync(doc_id: int) -> dict:
+def process_document_sync(doc_id: int, merge_pages: list[int] = None) -> dict:
     """
     Główna funkcja OCR dla ProcessPoolExecutor.
     Używa tylko SQLite - bez SQLModel Session.
+
+    Args:
+        doc_id: Document ID to process
+        merge_pages: Optional list of page numbers for merge mode
     """
     try:
-        print(f"🔄 [PROCES] Rozpoczynam OCR dla dokumentu {doc_id}")
+        if merge_pages:
+            print(f"🔄 [PROCES] Rozpoczynam merge OCR dla dokumentu {doc_id}, strony: {merge_pages}")
+        else:
+            print(f"🔄 [PROCES] Rozpoczynam OCR dla dokumentu {doc_id}")
 
         # Wyczyść CUDA na początku procesu
         ensure_cuda_cleanup()
 
         # Uruchom główne przetwarzanie
-        result_id = process_document_sqlite(doc_id)
+        result_id = process_document_sqlite(doc_id, merge_pages=merge_pages)
 
         print(f"✅ [PROCES] OCR zakończony dla {doc_id}, txt_doc_id: {result_id}")
         return {"success": True, "doc_id": doc_id, "result_id": result_id}
@@ -79,9 +86,13 @@ def process_document_sync(doc_id: int) -> dict:
         return {"success": False, "error": error_msg, "doc_id": doc_id}
 
 
-def process_document_sqlite(doc_id: int) -> int:
+def process_document_sqlite(doc_id: int, merge_pages: list[int] = None) -> int:
     """
     Główna funkcja przetwarzania OCR używająca tylko SQLite.
+
+    Args:
+        doc_id: Document ID to process
+        merge_pages: Optional list of page numbers for merge mode
 
     Returns:
         int: ID utworzonego dokumentu TXT lub None w przypadku błędu
@@ -96,10 +107,16 @@ def process_document_sqlite(doc_id: int) -> int:
 
     stored_filename, original_filename, mime_type, content_type, sygnatura, step = doc_data
 
-    # Oznacz jako running
-    update_document_status(doc_id, "running", "Inicjalizacja procesu OCR", 0.0)
+    # Określ tryb
+    is_merge = merge_pages is not None and len(merge_pages) > 0
 
-    print(f"🔄 [PROCES] Przetwarzam: {original_filename}")
+    # Oznacz jako running
+    if is_merge:
+        update_document_status(doc_id, "running", f"Merge OCR: strony {merge_pages}", 0.0)
+        print(f"🔄 [MERGE] Przetwarzam: {original_filename}, strony: {merge_pages}")
+    else:
+        update_document_status(doc_id, "running", "Inicjalizacja procesu OCR", 0.0)
+        print(f"🔄 [PROCES] Przetwarzam: {original_filename}")
 
     # Sprawdź czy plik istnieje
     file_path = FILES_DIR / stored_filename
@@ -109,22 +126,35 @@ def process_document_sqlite(doc_id: int) -> int:
     # Określ typ przetwarzania
     is_image = content_type == 'image' or (mime_type and mime_type.startswith('image/'))
 
+    # Merge mode only works with PDFs
+    if is_merge and is_image:
+        raise Exception("Merge OCR jest dostępny tylko dla dokumentów PDF, nie dla obrazów")
+
     try:
         if is_image:
             # Przetwarzanie pojedynczego obrazu
             text_all, confidence_score = process_single_image(doc_id, file_path, original_filename)
+        elif is_merge:
+            # Merge mode: process only selected pages
+            text_all, confidence_score = process_pdf_document_merge(
+                doc_id, file_path, original_filename, merge_pages
+            )
         else:
             # Przetwarzanie PDF (wielostronicowe)
             text_all, confidence_score = process_pdf_document(doc_id, file_path, original_filename)
 
-            # Osadź tekst w PDF jeśli to PDF
-            if mime_type == 'application/pdf':
-                print(f"📎 [PROCES] Osadzanie tekstu w PDF")
-                update_document_status(doc_id, "running", "Osadzanie tekstu w pliku PDF", 0.95)
-                embed_text_in_pdf(file_path)
+        # Osadź tekst w PDF jeśli to PDF (skip for merge to avoid overwriting)
+        if mime_type == 'application/pdf' and not is_merge:
+            print(f"📎 [PROCES] Osadzanie tekstu w PDF")
+            update_document_status(doc_id, "running", "Osadzanie tekstu w pliku PDF", 0.95)
+            embed_text_in_pdf(file_path)
 
         # Zapisz wyniki do plików i bazy
-        txt_doc_id = save_ocr_results(doc_id, text_all, confidence_score, original_filename, sygnatura, step)
+        txt_doc_id = save_ocr_results(
+            doc_id, text_all, confidence_score,
+            original_filename, sygnatura, step,
+            is_merge=is_merge
+        )
 
         # Zaktualizuj status na done
         update_document_status(doc_id, "done", "OCR zakończony", 1.0, confidence_score)
@@ -530,8 +560,171 @@ def process_pdf_document(doc_id: int, file_path: Path, filename: str):
     return text_all, avg_confidence
 
 
+def process_pdf_document_merge(doc_id: int, file_path: Path, filename: str, merge_pages: list[int]):
+    """
+    Process only selected pages from PDF and merge with existing OCR results.
+
+    Args:
+        doc_id: Document ID
+        file_path: Path to PDF file
+        filename: Original filename
+        merge_pages: List of page numbers to re-OCR
+
+    Returns:
+        Tuple of (combined_text, average_confidence)
+    """
+    print(f"📄 [MERGE] PDF: {filename}, strony: {merge_pages}")
+
+    # Get existing OCR text
+    existing_text = get_existing_ocr_text(doc_id)
+    existing_pages = parse_ocr_pages(existing_text)
+
+    print(f"📄 [MERGE] Istniejące strony OCR: {sorted(existing_pages.keys()) if existing_pages else 'brak'}")
+
+    update_document_status(doc_id, "running", "Konwersja PDF na obrazy", 0.1)
+
+    # Convert PDF to images
+    from pdf2image import convert_from_path
+    all_page_images = convert_from_path(str(file_path), dpi=200)
+    total_pages = len(all_page_images)
+
+    # Validate page selection
+    invalid_pages = [p for p in merge_pages if p < 1 or p > total_pages]
+    if invalid_pages:
+        raise ValueError(f"Nieprawidłowe numery stron: {invalid_pages}. PDF ma {total_pages} stron.")
+
+    update_document_status(
+        doc_id, "running",
+        f"Merge OCR: {len(merge_pages)} z {total_pages} stron",
+        0.2, total_pages=total_pages
+    )
+
+    print(f"📄 [MERGE] PDF ma {total_pages} stron, przetwarzam: {merge_pages}")
+
+    # Prepare only selected pages for processing
+    selected_pages = [(all_page_images[p - 1], p) for p in merge_pages]
+
+    # Process selected pages
+    available_gpu_ids = get_available_gpus_for_ocr()
+    if not available_gpu_ids:
+        available_gpu_ids = [0]  # Fallback to GPU 0
+
+    max_parallel = min(len(available_gpu_ids), len(selected_pages))
+
+    new_page_texts = {}
+    confidences = []
+    temp_files = []
+
+    # Save selected pages to temp files
+    import tempfile
+    page_tasks = []
+
+    for img, page_num in selected_pages:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
+            img_path = tmp_img.name
+            temp_files.append(img_path)
+
+        img.save(img_path, "PNG")
+
+        # Assign GPU in round-robin fashion
+        idx = merge_pages.index(page_num)
+        assigned_gpu = available_gpu_ids[idx % len(available_gpu_ids)]
+
+        page_tasks.append({
+            'img_path': img_path,
+            'page_number': page_num,
+            'doc_id': doc_id,
+            'total_pages': total_pages,
+            'assigned_gpu': assigned_gpu
+        })
+
+        print(f"🔍 [MERGE] Page {page_num} → GPU {assigned_gpu}")
+
+    try:
+        merge_count = len(merge_pages)
+
+        if max_parallel <= 1 or len(selected_pages) == 1:
+            # Sequential processing
+            print(f"📄 [MERGE] Przetwarzanie sekwencyjne")
+            for idx, page_data in enumerate(page_tasks):
+                page_num = page_data['page_number']
+                current_merge_page = idx + 1
+                progress = 0.2 + (0.7 * current_merge_page / merge_count)
+                update_document_status(
+                    doc_id, "running",
+                    f"Merge: strona {current_merge_page}/{merge_count} (PDF str. {page_num})",
+                    progress, current_page=current_merge_page, total_pages=merge_count
+                )
+
+                result = process_single_page_with_gpu(page_data)
+
+                new_page_texts[page_num] = result['text']
+                if result.get('confidence'):
+                    confidences.append(result['confidence'])
+
+                print(f"✅ [MERGE] Strona {page_num} przetworzona ({current_merge_page}/{merge_count})")
+        else:
+            # Parallel processing
+            print(f"🚀 [MERGE] Przetwarzanie równoległe na {max_parallel} GPU")
+
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+
+            with ProcessPoolExecutor(max_workers=max_parallel) as executor:
+                futures = {
+                    executor.submit(process_single_page_with_gpu, data): data['page_number']
+                    for data in page_tasks
+                }
+
+                completed = 0
+                for future in as_completed(futures):
+                    page_num = futures[future]
+                    try:
+                        result = future.result()
+                        new_page_texts[page_num] = result['text']
+                        if result.get('confidence'):
+                            confidences.append(result['confidence'])
+
+                        completed += 1
+                        progress = 0.2 + (0.7 * completed / merge_count)
+                        update_document_status(
+                            doc_id, "running",
+                            f"Merge: {completed}/{merge_count} stron",
+                            progress, current_page=completed, total_pages=merge_count
+                        )
+
+                        print(f"✅ [MERGE] Strona {page_num} zakończona ({completed}/{merge_count})")
+
+                    except Exception as e:
+                        print(f"❌ [MERGE] Błąd strony {page_num}: {e}")
+                        new_page_texts[page_num] = f"[Błąd OCR strony {page_num}: {str(e)}]"
+
+    finally:
+        # Cleanup temp files
+        for temp_file in temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception as cleanup_error:
+                print(f"⚠️ [MERGE] Cleanup error: {cleanup_error}")
+
+    # Merge: update existing pages with new OCR results
+    merged_pages = existing_pages.copy()
+    merged_pages.update(new_page_texts)
+
+    print(f"📄 [MERGE] Scalono {len(new_page_texts)} nowych stron z {len(existing_pages)} istniejącymi")
+
+    # Reconstruct full text
+    merged_text = reconstruct_ocr_text(merged_pages, total_pages)
+
+    # Calculate average confidence for new pages only
+    avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+
+    return merged_text, avg_confidence
+
+
 def save_ocr_results(doc_id: int, text_content: str, confidence: float,
-                    original_filename: str, sygnatura: str, step: str) -> int:
+                    original_filename: str, sygnatura: str, step: str,
+                    is_merge: bool = False) -> int:
     """Zapisuje wyniki OCR do pliku i bazy danych."""
 
     update_document_status(doc_id, "running", "Zapisywanie wyników", 0.9)
@@ -539,31 +732,76 @@ def save_ocr_results(doc_id: int, text_content: str, confidence: float,
     # KRYTYCZNE: Walidacja tekstu przed zapisem
     if text_content is None:
         raise Exception("OCR zwrócił None - proces zakończony niepowodzeniem")
-    
+
     if not isinstance(text_content, str):
         raise Exception(f"OCR zwrócił nieprawidłowy typ danych: {type(text_content)}")
-    
+
     if len(text_content.strip()) == 0:
         raise Exception("OCR nie rozpoznał żadnego tekstu - obraz może być nieczytelny lub uszkodzony")
 
-    # Zapisz tekst do pliku (tylko jeśli walidacja przeszła)
+    db_path = get_db_path()
+
+    # Merge mode: update existing OCR document
+    if is_merge:
+        with sqlite3.connect(str(db_path)) as conn:
+            cursor = conn.cursor()
+
+            # Find existing OCR document
+            cursor.execute("""
+                SELECT id, stored_filename FROM document
+                WHERE ocr_parent_id = ? AND doc_type = 'ocr_txt'
+                ORDER BY upload_time DESC LIMIT 1
+            """, (doc_id,))
+
+            existing = cursor.fetchone()
+
+            if existing:
+                txt_doc_id, txt_filename = existing
+                txt_path = FILES_DIR / txt_filename
+
+                # Update existing file
+                txt_path.write_text(text_content, encoding="utf-8")
+
+                # Update metadata
+                now_iso = datetime.utcnow().isoformat()
+                cursor.execute("""
+                    UPDATE document SET
+                        ocr_confidence = ?,
+                        last_modified = ?
+                    WHERE id = ?
+                """, (confidence, now_iso, txt_doc_id))
+
+                conn.commit()
+
+                print(f"📝 [MERGE] Zaktualizowano istniejący dokument OCR ID: {txt_doc_id}")
+
+                # Clear cache
+                try:
+                    from app.text_extraction import clear_text_cache
+                    clear_text_cache(doc_id)
+                except Exception as e:
+                    print(f"⚠️ [PROCES] Błąd czyszczenia cache: {e}")
+
+                return txt_doc_id
+
+        # If no existing OCR found in merge mode, fall through to create new
+
+    # Standard mode: delete old and create new
     txt_filename = f"{uuid.uuid4().hex}.txt"
     txt_path = FILES_DIR / txt_filename
     txt_path.write_text(text_content, encoding="utf-8")
 
     print(f"💾 [PROCES] Zapisano tekst: {txt_filename} ({len(text_content)} znaków)")
 
-    # Zapisz do bazy danych
-    db_path = get_db_path()
     with sqlite3.connect(str(db_path)) as conn:
         cursor = conn.cursor()
 
-        # ✅ NOWE: Usuń stare dokumenty OCR dla tego dokumentu
+        # Usuń stare dokumenty OCR dla tego dokumentu
         print(f"🧹 [PROCES] Usuwam stare dokumenty OCR dla doc_id={doc_id}")
 
         # Pobierz stare dokumenty OCR
         cursor.execute("""
-            SELECT id, stored_filename FROM document 
+            SELECT id, stored_filename FROM document
             WHERE ocr_parent_id = ? AND doc_type = 'ocr_txt'
         """, (doc_id,))
         old_ocr_docs = cursor.fetchall()
@@ -580,7 +818,7 @@ def save_ocr_results(doc_id: int, text_content: str, confidence: float,
 
         # Usuń stare rekordy z bazy
         cursor.execute("""
-            DELETE FROM document 
+            DELETE FROM document
             WHERE ocr_parent_id = ? AND doc_type = 'ocr_txt'
         """, (doc_id,))
 
@@ -609,7 +847,7 @@ def save_ocr_results(doc_id: int, text_content: str, confidence: float,
 
         print(f"✅ [PROCES] Utworzono nowy dokument TXT ID: {txt_doc_id}")
 
-        # ✅ NOWE: Wyczyść cache tekstów dla tego dokumentu
+        # Wyczyść cache tekstów dla tego dokumentu
         try:
             from app.text_extraction import clear_text_cache
             clear_text_cache(doc_id)
@@ -716,6 +954,174 @@ def count_available_gpus_for_ocr() -> int:
 def get_db_path() -> Path:
     """Zwraca ścieżkę do bazy danych."""
     return Path(__file__).parent.parent.parent / "data.db"
+
+
+def parse_page_selection(selection: str) -> list[int]:
+    """
+    Parse page selection string like "1,3,5-7" into sorted list [1, 3, 5, 6, 7].
+
+    Args:
+        selection: Page selection string (e.g., "1,3,5-7")
+
+    Returns:
+        Sorted list of page numbers
+
+    Raises:
+        ValueError: If selection format is invalid
+    """
+    if not selection or not selection.strip():
+        raise ValueError("Pusty wybór stron")
+
+    pages = set()
+
+    for part in selection.split(','):
+        part = part.strip()
+        if not part:
+            continue
+
+        if '-' in part:
+            # Range: "5-7"
+            range_parts = part.split('-')
+            if len(range_parts) != 2:
+                raise ValueError(f"Nieprawidłowy format zakresu: {part}")
+
+            try:
+                start = int(range_parts[0].strip())
+                end = int(range_parts[1].strip())
+            except ValueError:
+                raise ValueError(f"Nieprawidłowe numery stron w zakresie: {part}")
+
+            if start < 1 or end < 1:
+                raise ValueError(f"Numery stron muszą być większe od 0: {part}")
+
+            if start > end:
+                raise ValueError(f"Początek zakresu większy od końca: {part}")
+
+            pages.update(range(start, end + 1))
+        else:
+            # Single page: "3"
+            try:
+                page_num = int(part)
+            except ValueError:
+                raise ValueError(f"Nieprawidłowy numer strony: {part}")
+
+            if page_num < 1:
+                raise ValueError(f"Numer strony musi być większy od 0: {part}")
+
+            pages.add(page_num)
+
+    if not pages:
+        raise ValueError("Nie podano żadnych stron")
+
+    return sorted(pages)
+
+
+def parse_ocr_pages(text: str) -> dict[int, str]:
+    """
+    Parse OCR text into page dictionary by splitting on page markers.
+
+    Args:
+        text: OCR text with page markers like "=== Strona X ==="
+
+    Returns:
+        Dictionary mapping page number to text content.
+        If no markers found, returns {1: text} (treat as single page).
+    """
+    if not text or not text.strip():
+        return {}
+
+    import re
+
+    # Pattern for page markers
+    page_pattern = re.compile(r'^=== Strona (\d+) ===$', re.MULTILINE)
+
+    # Find all page markers
+    matches = list(page_pattern.finditer(text))
+
+    if not matches:
+        # No page markers found - treat entire text as page 1
+        return {1: text.strip()}
+
+    pages = {}
+
+    for i, match in enumerate(matches):
+        page_num = int(match.group(1))
+        start_pos = match.end()
+
+        # Find end position (next marker or end of text)
+        if i + 1 < len(matches):
+            end_pos = matches[i + 1].start()
+        else:
+            end_pos = len(text)
+
+        # Extract page text
+        page_text = text[start_pos:end_pos].strip()
+        pages[page_num] = page_text
+
+    return pages
+
+
+def reconstruct_ocr_text(pages: dict[int, str], total_pages: int) -> str:
+    """
+    Reconstruct full OCR text from page dictionary with proper markers.
+
+    Args:
+        pages: Dictionary mapping page number to text content
+        total_pages: Total number of pages in document
+
+    Returns:
+        Combined text with page markers
+    """
+    if not pages:
+        return ""
+
+    result = []
+
+    for page_num in range(1, total_pages + 1):
+        page_text = pages.get(page_num, "")
+
+        if page_num > 1:
+            result.append("\n\n")
+
+        result.append(f"=== Strona {page_num} ===\n\n")
+        result.append(page_text)
+
+    return ''.join(result).strip()
+
+
+def get_existing_ocr_text(doc_id: int) -> str:
+    """
+    Get existing OCR text for a document.
+
+    Args:
+        doc_id: Source document ID
+
+    Returns:
+        OCR text content or empty string if not found
+    """
+    db_path = get_db_path()
+
+    with sqlite3.connect(str(db_path)) as conn:
+        cursor = conn.cursor()
+
+        # Find OCR document for this source
+        cursor.execute("""
+            SELECT stored_filename FROM document
+            WHERE ocr_parent_id = ? AND doc_type = 'ocr_txt'
+            ORDER BY upload_time DESC LIMIT 1
+        """, (doc_id,))
+
+        result = cursor.fetchone()
+
+        if not result:
+            return ""
+
+        # Read text file
+        txt_path = FILES_DIR / result[0]
+        if not txt_path.exists():
+            return ""
+
+        return txt_path.read_text(encoding="utf-8")
 
 
 def get_document_data(doc_id: int):
