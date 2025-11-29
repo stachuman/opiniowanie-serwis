@@ -23,6 +23,8 @@ ALLOWED_EXTENSIONS = {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
     '.png': 'image/png',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif',
     '.tif': 'image/tiff',
     '.tiff': 'image/tiff',
     '.bmp': 'image/bmp',

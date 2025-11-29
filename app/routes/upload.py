@@ -4,11 +4,13 @@ Endpointy związane z uploadowaniem dokumentów i tworzeniem opinii.
 REFAKTORYZACJA: Logika biznesowa przeniesiona do tasks/upload_manager.py
 """
 
-from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session
 from datetime import datetime
+from typing import List
+from pydantic import BaseModel
 
 # Lokalne importy
 from app.db import engine, BASE_DIR
@@ -24,6 +26,28 @@ from tasks.upload_manager import upload_manager
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+# ==================== REQUEST MODELS ====================
+
+class Base64ImageBatch(BaseModel):
+    """Request model for Base64 batch upload from iPhone."""
+    images: List[str]  # Base64-encoded image data (can be single string or array)
+    filenames: List[str]  # Original filenames (can be single string or array)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "images": ["/9j/4AAQSkZJRg...", "iVBORw0KGgo..."],
+                "filenames": ["photo1.jpg", "photo2.png"]
+            }
+        }
+
+    @classmethod
+    def validate(cls, values):
+        """Allow single values to be converted to lists for iPhone compatibility."""
+        # This will be handled by the endpoint itself
+        return values
 
 
 # ==================== ENDPOINTY UPLOAD OPINII ====================
@@ -134,6 +158,237 @@ async def quick_ocr(request: Request, files: list[UploadFile] = File(...)):
         return RedirectResponse(result.redirect_url, status_code=303)
     else:
         raise HTTPException(status_code=400, detail=result.error_message)
+
+
+# ==================== MOBILE API ENDPOINT ====================
+
+@router.post("/api/upload/mobile", name="api_mobile_upload")
+async def api_mobile_upload(files: list[UploadFile] = File(...)):
+    """
+    Mobile-friendly API endpoint for uploading files from iPhone.
+
+    Supports two modes:
+    1. Single PDF upload (backward compatible)
+    2. Multiple images → automatically combined into single multi-page PDF
+
+    Automatically:
+    - Creates new Opinia with timestamp name
+    - Uploads/converts files to PDF
+    - Queues OCR processing
+
+    Returns JSON with document details for mobile consumption.
+    """
+
+    # Delegate to upload manager for mobile upload (handles validation)
+    result = await upload_manager.create_mobile_upload(files)
+
+    if result.success:
+        # Determine if multiple images were converted
+        image_count = len(files) if len(files) > 1 else None
+
+        # Build debug info about received files
+        debug_files = [
+            {
+                "filename": file.filename,
+                "content_type": file.content_type,
+                "size_bytes": file.size if hasattr(file, 'size') else "unknown"
+            }
+            for file in files
+        ]
+
+        # Return JSON response for mobile
+        return {
+            "success": True,
+            "opinion_id": result.uploaded_doc_ids[0] if result.uploaded_doc_ids else None,
+            "document_id": result.uploaded_doc_ids[1] if len(result.uploaded_doc_ids) > 1 else None,
+            "ocr_queued": result.has_ocr_docs,
+            "image_count": image_count,
+            "message": f"Upload successful. {f'{image_count} images combined into PDF. ' if image_count else ''}OCR processing started.",
+            "preview_url": result.redirect_url,
+            "debug": {
+                "files_received": len(files),
+                "files_list": debug_files
+            }
+        }
+    else:
+        raise HTTPException(status_code=500, detail=result.error_message)
+
+
+@router.post("/api/upload/mobile/batch", name="api_mobile_upload_batch")
+async def api_mobile_upload_batch(request: Request):
+    """
+    Base64 batch upload endpoint for iPhone Shortcuts.
+
+    Accepts multiple Base64-encoded images in JSON format and combines them
+    into a single multi-page PDF with automatic OCR processing.
+
+    This endpoint solves iPhone Shortcuts limitation where multipart/form-data
+    cannot send arrays of files.
+
+    Request body:
+    {
+        "images": ["base64_string_1", "base64_string_2", ...],
+        "filenames": ["IMG_0001.jpg", "IMG_0002.jpg", ...]
+    }
+
+    Validation:
+    - 1-50 images required
+    - Arrays must have equal length
+    - Supported formats: .jpg, .jpeg, .png, .heic
+    - Max 30MB per Base64 string (~22MB original image)
+
+    Returns JSON with opinion and document IDs.
+    """
+    import base64
+    import tempfile
+    from pathlib import Path
+    from fastapi import UploadFile
+    import io
+
+    # Parse JSON body manually to handle iPhone Shortcuts format
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
+
+    # DEBUG: Log raw received data
+    print("=" * 80)
+    print(f"📦 BASE64 BATCH UPLOAD RECEIVED")
+    print(f"   Raw body type: {type(body)}")
+    print(f"   Raw body keys: {body.keys() if isinstance(body, dict) else 'N/A'}")
+
+    # Extract images and filenames, handling both string and list formats
+    raw_images = body.get("images")
+    raw_filenames = body.get("filenames")
+
+    # Convert to lists if single values (iPhone Shortcuts compatibility)
+    # iPhone Shortcuts concatenates multiple items with newlines when using "Get Name" or "Base64 Encode"
+    if isinstance(raw_images, str):
+        # Split on newlines to handle multiple images concatenated by iPhone
+        images = [img.strip() for img in raw_images.split('\n') if img.strip()]
+        print(f"   ⚠️  'images' was a string, split by newlines into {len(images)} element(s)")
+    elif isinstance(raw_images, list):
+        images = raw_images
+    else:
+        raise HTTPException(status_code=400, detail=f"'images' must be a string or list, got {type(raw_images)}")
+
+    if isinstance(raw_filenames, str):
+        # Split on newlines to handle multiple filenames concatenated by iPhone
+        filenames = [fn.strip() for fn in raw_filenames.split('\n') if fn.strip()]
+        print(f"   ⚠️  'filenames' was a string, split by newlines into {len(filenames)} element(s)")
+    elif isinstance(raw_filenames, list):
+        filenames = raw_filenames
+    else:
+        raise HTTPException(status_code=400, detail=f"'filenames' must be a string or list, got {type(raw_filenames)}")
+
+    print(f"   Images: {len(images)}")
+    print(f"   Filenames: {len(filenames)}")
+    print(f"   Files: {', '.join(filenames[:5])}{' ...' if len(filenames) > 5 else ''}")
+    print("=" * 80)
+
+    # Validation: array lengths must match
+    if len(images) != len(filenames):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Array length mismatch: {len(images)} images but {len(filenames)} filenames"
+        )
+
+    # Validation: file count
+    if len(images) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No images provided. Upload at least 1 image."
+        )
+
+    if len(images) > 50:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many images ({len(images)}). Maximum 50 images per upload."
+        )
+
+    # Validation: file extensions
+    allowed_extensions = {'.jpg', '.jpeg', '.png', '.heic'}
+    for filename in filenames:
+        ext = Path(filename).suffix.lower()
+        if ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {ext} in '{filename}'. Allowed: .jpg, .jpeg, .png, .heic"
+            )
+
+    # Decode Base64 and create UploadFile objects
+    upload_files = []
+    max_size = 30 * 1024 * 1024  # 30MB Base64 string (~22MB original)
+
+    for idx, (b64_data, filename) in enumerate(zip(images, filenames)):
+        try:
+            # Validate Base64 string size
+            if len(b64_data) > max_size:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Image {idx + 1} ('{filename}') Base64 data exceeds 30MB limit"
+                )
+
+            # Decode Base64 to bytes
+            try:
+                image_bytes = base64.b64decode(b64_data, validate=True)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Image {idx + 1} ('{filename}') has invalid Base64 encoding: {str(e)}"
+                )
+
+            # Validate decoded size (max ~22MB original)
+            if len(image_bytes) > 22 * 1024 * 1024:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Image {idx + 1} ('{filename}') exceeds 22MB after decoding"
+                )
+
+            if len(image_bytes) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Image {idx + 1} ('{filename}') is empty after decoding"
+                )
+
+            # Create UploadFile from decoded bytes
+            file_obj = io.BytesIO(image_bytes)
+            upload_file = UploadFile(
+                filename=filename,
+                file=file_obj
+            )
+            upload_files.append(upload_file)
+
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to process image {idx + 1} ('{filename}'): {str(e)}"
+            )
+
+    # Delegate to existing upload manager (reuses all validation and conversion logic)
+    print(f"🔄 Processing {len(upload_files)} decoded images...")
+    result = await upload_manager.create_mobile_upload(upload_files)
+
+    if result.success:
+        image_count = len(upload_files)
+        print(f"✅ Base64 batch upload successful: Opinion #{result.uploaded_doc_ids[0]}, Document #{result.uploaded_doc_ids[1] if len(result.uploaded_doc_ids) > 1 else 'N/A'}")
+        print("=" * 80)
+
+        return {
+            "success": True,
+            "opinion_id": result.uploaded_doc_ids[0] if result.uploaded_doc_ids else None,
+            "document_id": result.uploaded_doc_ids[1] if len(result.uploaded_doc_ids) > 1 else None,
+            "ocr_queued": result.has_ocr_docs,
+            "image_count": image_count,
+            "message": f"Upload successful. {image_count} images combined into PDF. OCR processing started.",
+            "preview_url": result.redirect_url
+        }
+    else:
+        print(f"❌ Base64 batch upload failed: {result.error_message}")
+        print("=" * 80)
+        raise HTTPException(status_code=500, detail=result.error_message)
 
 
 # ==================== ENDPOINTY UPLOADU DO OPINII ====================

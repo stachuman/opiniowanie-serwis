@@ -479,10 +479,117 @@ def opinion_update_note(request: Request, doc_id: int, note: str = Form("")):
             )
 
 
+@router.post("/opinion/{doc_id}/delete", name="opinion_delete")
+async def delete_empty_opinion(request: Request, doc_id: int):
+    """
+    Deletes an empty opinia.
+
+    Validates that:
+    - Opinia exists and is a main document
+    - Opinia has no user documents (only system files like OCR results)
+    - System files will be cascade-deleted
+    """
+    from tasks.opinion_manager import opinion_manager, ValidationError, DeletionError
+
+    try:
+        # Validate first - fail fast
+        validation = opinion_manager.validate_opinia_can_be_deleted(doc_id)
+
+        if not validation.can_delete:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete opinia: {validation.reason}"
+            )
+
+        # Show warning if system files will be deleted
+        if validation.system_documents:
+            # Could add a confirmation parameter here if needed
+            pass
+
+        # Perform deletion
+        result = opinion_manager.delete_empty_opinia(doc_id)
+
+        return RedirectResponse("/", status_code=303)
+
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except DeletionError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting opinia: {str(e)}")
+
+
+@router.get("/api/opinion/{doc_id}/can-delete", name="api_opinion_can_delete")
+def check_opinion_can_delete(doc_id: int):
+    """
+    Checks if an opinia can be deleted and returns validation details.
+
+    This is useful for UI to show/hide delete button and display warnings.
+    """
+    from tasks.opinion_manager import opinion_manager, ValidationError
+
+    try:
+        validation = opinion_manager.validate_opinia_can_be_deleted(doc_id)
+
+        return {
+            "success": True,
+            "can_delete": validation.can_delete,
+            "reason": validation.reason,
+            "user_documents_count": len(validation.user_documents),
+            "system_documents_count": len(validation.system_documents),
+            "user_documents": [
+                {
+                    "id": doc.id,
+                    "filename": doc.original_filename,
+                    "type": doc.doc_type
+                }
+                for doc in validation.user_documents
+            ],
+            "system_documents": [
+                {
+                    "id": doc.id,
+                    "filename": doc.original_filename,
+                    "type": doc.doc_type
+                }
+                for doc in validation.system_documents
+            ]
+        }
+    except ValidationError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        return {"success": False, "error": f"Validation error: {str(e)}"}
+
+
+@router.get("/api/opinions/list", name="api_opinions_list")
+def get_opinions_list():
+    """
+    Returns a simple list of all opinions for dropdowns.
+
+    Returns JSON array with opinion id, sygnatura, original_filename, and step.
+    """
+    with Session(engine) as session:
+        opinions = session.exec(
+            select(Document)
+            .where(Document.is_main == True)
+            .order_by(Document.upload_time.desc())
+        ).all()
+
+        return [
+            {
+                "id": opinion.id,
+                "sygnatura": opinion.sygnatura,
+                "original_filename": opinion.original_filename,
+                "step": opinion.step,
+                "doc_type": opinion.doc_type
+            }
+            for opinion in opinions
+        ]
+
+
 @router.post("/api/search/additional-contexts", name="api_additional_contexts")
 def get_additional_contexts(request: AdditionalContextsRequest):
     """API endpoint do pobierania dodatkowych kontekstów wyszukiwania."""
-    
+
     with Session(engine) as session:
         # Pobierz dokument
         document = session.get(Document, request.doc_id)

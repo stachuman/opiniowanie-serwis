@@ -122,12 +122,19 @@
         </div>
 
       </div>
-      <div class="btn-group">
-        <button type="submit" class="btn btn-primary">
-          <i class="bi bi-check-lg me-1"></i>Zapisz zmiany
+      <div class="d-flex justify-content-between align-items-center">
+        <div class="btn-group">
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-lg me-1"></i>Zapisz zmiany
+          </button>
+        </div>
+        <button type="button" class="btn btn-outline-danger" id="deleteEmptyOpinionBtn"
+                data-bs-toggle="modal" data-bs-target="#deleteEmptyOpinionModal" style="display: none;">
+          <i class="bi bi-trash me-1"></i>Usuń pustą opinię
         </button>
       </div>
-</div>
+    </form>
+  </div>
 </div>
 
 
@@ -341,4 +348,152 @@
   </div>
 </div>
 {% endif %}
+
+<!-- Form for deleting opinia (outside modal to avoid nesting issues) -->
+<form method="post" action="/opinion/{{ opinion.id }}/delete" id="deleteOpinionForm" style="display: none;"></form>
+
+<!-- Modal potwierdzenia usunięcia pustej opinii -->
+<div class="modal fade" id="deleteEmptyOpinionModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Usuń pustą opinię</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Czy na pewno chcesz usunąć opinię <strong>{{ opinion.sygnatura or opinion.original_filename }}</strong>?</p>
+
+        <div id="deleteValidationInfo" class="alert alert-info">
+          <div class="spinner-border spinner-border-sm me-2" role="status">
+            <span class="visually-hidden">Sprawdzanie...</span>
+          </div>
+          Sprawdzanie czy opinia może zostać usunięta...
+        </div>
+
+        <div id="deleteWarning" style="display: none;"></div>
+        <div id="deleteError" class="alert alert-danger" style="display: none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+        <button type="submit" class="btn btn-danger" id="confirmDeleteBtn" form="deleteOpinionForm" disabled>
+          <i class="bi bi-trash"></i> Usuń
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const opinionId = {{ opinion.id }};
+  const deleteBtn = document.getElementById('deleteEmptyOpinionBtn');
+  const deleteModal = document.getElementById('deleteEmptyOpinionModal');
+
+  // Check if opinion can be deleted on page load
+  checkIfCanDelete();
+
+  async function checkIfCanDelete() {
+    try {
+      const response = await fetch(`/api/opinion/${opinionId}/can-delete`);
+      const result = await response.json();
+
+      if (result.success && result.can_delete) {
+        // Show delete button
+        if (deleteBtn) {
+          deleteBtn.style.display = 'inline-block';
+        }
+      }
+    } catch (error) {
+      console.error('Error checking if can delete:', error);
+    }
+  }
+
+  // Validate when modal is opened
+  if (deleteModal) {
+    deleteModal.addEventListener('show.bs.modal', async function() {
+      const validationInfo = document.getElementById('deleteValidationInfo');
+      const deleteWarning = document.getElementById('deleteWarning');
+      const deleteError = document.getElementById('deleteError');
+      const submitBtn = document.getElementById('confirmDeleteBtn');
+
+      // Check if essential elements exist
+      if (!validationInfo || !deleteWarning || !deleteError || !submitBtn) {
+        console.error('Modal elements not found - cannot proceed');
+        return;
+      }
+
+      // Reset state
+      validationInfo.style.display = 'block';
+      deleteWarning.style.display = 'none';
+      deleteError.style.display = 'none';
+      submitBtn.disabled = true;
+
+      try {
+        const response = await fetch(`/api/opinion/${opinionId}/can-delete`);
+        const result = await response.json();
+
+        validationInfo.style.display = 'none';
+
+        if (result.success && result.can_delete) {
+          // Can delete - enable delete button
+          submitBtn.disabled = false;
+          console.log('Delete button enabled');
+
+          // Show warning if system files will be deleted
+          if (result.system_documents_count > 0) {
+            deleteWarning.innerHTML = `
+              <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong>Uwaga:</strong> ${result.reason}
+                <div class="mt-2 small">
+                  ${result.system_documents.map(doc => `• ${doc.type}: ${doc.filename}`).join('<br>')}
+                </div>
+              </div>
+            `;
+            deleteWarning.style.display = 'block';
+          } else {
+            deleteWarning.innerHTML = `
+              <div class="alert alert-success">
+                <i class="bi bi-check-circle-fill me-2"></i>
+                ${result.reason}
+              </div>
+            `;
+            deleteWarning.style.display = 'block';
+          }
+        } else {
+          // Cannot delete - show error
+          deleteError.innerHTML = `
+            <i class="bi bi-x-circle-fill me-2"></i>
+            <strong>Nie można usunąć opinii:</strong><br>
+            ${result.reason}
+          `;
+          deleteError.style.display = 'block';
+
+          if (result.user_documents_count > 0) {
+            const docsList = result.user_documents.map(doc =>
+              `<li>${doc.filename} (${doc.type})</li>`
+            ).join('');
+            deleteError.innerHTML += `
+              <div class="mt-2">
+                <strong>Dokumenty do usunięcia lub przeniesienia:</strong>
+                <ul class="mb-0 mt-1">${docsList}</ul>
+              </div>
+            `;
+          }
+        }
+      } catch (error) {
+        console.error('Error validating delete:', error);
+        validationInfo.style.display = 'none';
+        deleteError.textContent = `Błąd walidacji: ${error.message}`;
+        deleteError.style.display = 'block';
+      }
+    });
+  }
+
+  console.log('Opinion Detail - delete functionality initialized');
+});
+</script>
 {% endblock %}

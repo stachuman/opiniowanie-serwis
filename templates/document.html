@@ -130,6 +130,12 @@
               <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteConfirmModal">
                 <i class="bi bi-trash"></i> Usuń
               </button>
+
+              {% if not doc.is_main %}
+              <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#moveDocumentModal">
+                <i class="bi bi-arrow-right-circle"></i> Przenieś do innej opinii
+              </button>
+              {% endif %}
             </div>
           </div>
         </div>
@@ -343,6 +349,61 @@
     </div>
   </div>
 </div>
+
+<!-- Modal przenoszenia dokumentu do innej opinii -->
+{% if not doc.is_main %}
+<div class="modal fade" id="moveDocumentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Przenieś dokument do innej opinii</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" action="{{ url_for('document_move', doc_id=doc.id) }}" id="moveDocumentForm">
+        <div class="modal-body">
+          <p>Dokument: <strong>{{ doc.original_filename }}</strong></p>
+
+          <div class="mb-3">
+            <label for="target_opinion_id" class="form-label">Wybierz docelową opinię</label>
+            <select name="target_opinion_id" id="target_opinion_id" class="form-select" required>
+              <option value="">-- Wybierz opinię --</option>
+            </select>
+            <div class="form-text">Dokument zostanie przeniesiony do wybranej opinii</div>
+          </div>
+
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="inherit_metadata" id="inherit_metadata" checked>
+            <label class="form-check-label" for="inherit_metadata">
+              Dziedzicz metadane z docelowej opinii (sygnatura, status)
+            </label>
+          </div>
+
+          {% if doc.ocr_status == 'done' %}
+          <div class="alert alert-info mt-3">
+            <i class="bi bi-info-circle-fill me-2"></i>
+            <strong>Info:</strong> Wyniki OCR zostaną automatycznie przeniesione razem z dokumentem.
+          </div>
+          {% elif doc.ocr_status in ['pending', 'running'] %}
+          <div class="alert alert-warning mt-3">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <strong>Uwaga:</strong> Nie można przenieść dokumentu podczas trwającego OCR. Poczekaj na zakończenie lub anuluj OCR.
+          </div>
+          {% endif %}
+
+          <div id="moveError" class="alert alert-danger mt-3" style="display: none;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+          <button type="submit" class="btn btn-success" id="moveDocumentBtn"
+                  {% if doc.ocr_status in ['pending', 'running'] %}disabled{% endif %}>
+            <i class="bi bi-arrow-right-circle"></i> Przenieś
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_head %}
@@ -1262,6 +1323,102 @@ document.addEventListener('DOMContentLoaded', function() {
         if (e.key === 'Enter') {
           e.preventDefault();
           mergeBtn.click();
+        }
+      });
+    }
+  }
+
+  // Move document functionality
+  const moveModal = document.getElementById('moveDocumentModal');
+  if (moveModal) {
+    // Load opinions list when modal is opened
+    moveModal.addEventListener('show.bs.modal', async function() {
+      const selectElem = document.getElementById('target_opinion_id');
+      if (!selectElem) return;
+
+      try {
+        // Fetch all opinions
+        const response = await fetch('/');  // This will load the opinions list
+        const text = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(text, 'text/html');
+
+        // Clear existing options except first
+        selectElem.innerHTML = '<option value="">-- Wybierz opinię --</option>';
+
+        // Extract opinions from the page (alternative: create API endpoint)
+        // For now, we'll use a simpler API call
+        const opinionsResponse = await fetch('/api/opinions/list');
+        const opinions = await opinionsResponse.json();
+
+        // Populate dropdown
+        const currentDocId = {{ doc.id }};
+        const currentParentId = {{ doc.parent_id or 'null' }};
+
+        opinions.forEach(opinion => {
+          // Skip current parent to avoid redundant move
+          if (opinion.id === currentParentId) {
+            const option = document.createElement('option');
+            option.value = opinion.id;
+            option.textContent = `${opinion.sygnatura || opinion.original_filename} (obecna opinia)`;
+            option.disabled = true;
+            option.selected = true;
+            selectElem.appendChild(option);
+          } else {
+            const option = document.createElement('option');
+            option.value = opinion.id;
+            const label = opinion.sygnatura || opinion.original_filename || `Opinia #${opinion.id}`;
+            option.textContent = `${label} (${opinion.step})`;
+            selectElem.appendChild(option);
+          }
+        });
+
+      } catch (error) {
+        console.error('Error loading opinions:', error);
+        selectElem.innerHTML = '<option value="">Błąd ładowania opinii</option>';
+      }
+    });
+
+    // Handle form submission
+    const moveForm = document.getElementById('moveDocumentForm');
+    if (moveForm) {
+      moveForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(moveForm);
+        const errorDiv = document.getElementById('moveError');
+        const submitBtn = document.getElementById('moveDocumentBtn');
+
+        try {
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Przenoszę...';
+          errorDiv.style.display = 'none';
+
+          const response = await fetch(moveForm.action, {
+            method: 'POST',
+            body: formData
+          });
+
+          const result = await response.json();
+
+          if (response.ok && result.success) {
+            if (window.alertManager) {
+              window.alertManager.success(result.message);
+            }
+            // Redirect to new parent opinion
+            setTimeout(() => {
+              window.location.href = result.redirect_url;
+            }, 1000);
+          } else {
+            throw new Error(result.detail || result.error || 'Nie udało się przenieść dokumentu');
+          }
+
+        } catch (error) {
+          console.error('Error moving document:', error);
+          errorDiv.textContent = error.message;
+          errorDiv.style.display = 'block';
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> Przenieś';
         }
       });
     }

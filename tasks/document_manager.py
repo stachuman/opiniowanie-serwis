@@ -68,6 +68,21 @@ class DocumentSummaryResult:
     note_mode: Optional[str] = None
 
 
+@dataclass
+class MoveDocumentResult:
+    """Wynik operacji przenoszenia dokumentu."""
+    success: bool
+    new_parent_id: Optional[int] = None
+    moved_ocr_count: int = 0
+    error_message: Optional[str] = None
+
+
+# Custom exceptions for move operations
+class ValidationError(Exception):
+    """Raised when validation fails with specific actionable message."""
+    pass
+
+
 class DocumentManager:
     """Manager dla wszystkich operacji na dokumentach."""
 
@@ -578,6 +593,109 @@ class DocumentManager:
                 "has_text": bool(ocr_text and ocr_text.strip()),  # True tylko jeśli ma treść
                 "doc_id": doc_id
             }
+
+    @staticmethod
+    def move_document_to_opinion(
+        doc_id: int,
+        target_opinion_id: int,
+        inherit_metadata: bool = True
+    ) -> MoveDocumentResult:
+        """
+        Moves a document to a different opinia with OCR cascade.
+
+        Validates:
+        - Source document exists and is not main
+        - Target opinia exists and is main
+        - No active OCR processing on source document
+        - OCR results follow the document to new parent
+
+        Args:
+            doc_id: Document to move
+            target_opinion_id: Target opinia ID
+            inherit_metadata: If True, copy sygnatura/step from target opinia
+
+        Returns:
+            MoveDocumentResult with details of the move
+
+        Raises:
+            ValidationError: If validation fails (explicit, not silent)
+        """
+        import logging
+        logger = logging.getLogger("document_manager")
+
+        with Session(engine) as session:
+            # Validate source document
+            doc = session.get(Document, doc_id)
+            if not doc:
+                raise ValidationError(f"Document {doc_id} not found")
+
+            if doc.is_main:
+                raise ValidationError(
+                    f"Cannot move main document (opinia). "
+                    f"Only attachments can be moved between opinias."
+                )
+
+            # Validate no active OCR
+            if doc.ocr_status in ['pending', 'running']:
+                raise ValidationError(
+                    f"Cannot move document while OCR is {doc.ocr_status}. "
+                    f"Wait for completion or cancel OCR first."
+                )
+
+            # Validate target opinia
+            target = session.get(Document, target_opinion_id)
+            if not target:
+                raise ValidationError(f"Target opinia {target_opinion_id} not found")
+
+            if not target.is_main:
+                raise ValidationError(
+                    f"Target document {target_opinion_id} is not an opinia"
+                )
+
+            # Find OCR results that should follow this document
+            ocr_results = session.exec(
+                select(Document).where(
+                    Document.ocr_parent_id == doc_id,
+                    Document.doc_type == "ocr_txt"
+                )
+            ).all()
+
+            # Perform move
+            old_parent_id = doc.parent_id
+            doc.parent_id = target_opinion_id
+
+            if inherit_metadata:
+                doc.sygnatura = target.sygnatura
+                doc.step = target.step
+
+            doc.last_modified = datetime.now()
+
+            session.add(doc)
+
+            # Move OCR results to follow the document
+            # OCR results maintain their ocr_parent_id relationship but get new parent_id
+            moved_ocr_count = 0
+            for ocr_doc in ocr_results:
+                ocr_doc.parent_id = target_opinion_id
+                if inherit_metadata:
+                    ocr_doc.sygnatura = target.sygnatura
+                    ocr_doc.step = target.step
+                ocr_doc.last_modified = datetime.now()
+                session.add(ocr_doc)
+                moved_ocr_count += 1
+
+            session.commit()
+
+            logger.info(
+                f"Moved document {doc_id} from opinia {old_parent_id} "
+                f"to opinia {target_opinion_id} (with {moved_ocr_count} OCR results)"
+            )
+
+            return MoveDocumentResult(
+                success=True,
+                new_parent_id=target_opinion_id,
+                moved_ocr_count=moved_ocr_count
+            )
 
 
 # Stwórz singleton instance

@@ -512,3 +512,44 @@ def get_ocr_text(doc_id: int):
     result = document_manager.get_ocr_text(doc_id)
 
     return result
+
+
+@router.post("/api/document/{doc_id}/move", name="document_move")
+async def move_document_to_opinion(
+    doc_id: int,
+    target_opinion_id: int = Form(...),
+    inherit_metadata: bool = Form(True)
+):
+    """
+    Moves a document to a different opinia.
+
+    Validates that:
+    - Document exists and is not a main document (opinia)
+    - Target opinia exists and is a main document
+    - No active OCR processing
+    - OCR results automatically follow the document
+    """
+    from tasks.document_manager import ValidationError
+
+    try:
+        result = document_manager.move_document_to_opinion(
+            doc_id=doc_id,
+            target_opinion_id=target_opinion_id,
+            inherit_metadata=inherit_metadata
+        )
+
+        ocr_msg = ""
+        if result.moved_ocr_count > 0:
+            ocr_msg = f" (including {result.moved_ocr_count} OCR result(s))"
+
+        return {
+            "success": True,
+            "message": f"Document moved to opinia {target_opinion_id}{ocr_msg}",
+            "new_parent_id": result.new_parent_id,
+            "moved_ocr_count": result.moved_ocr_count,
+            "redirect_url": f"/opinion/{target_opinion_id}"
+        }
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error moving document: {str(e)}")

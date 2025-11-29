@@ -22,6 +22,7 @@ from app.document_utils import (
     check_file_extension,
     get_content_type_from_mime
 )
+from tasks.image_pdf_converter import image_pdf_converter
 
 
 @dataclass
@@ -251,6 +252,243 @@ class UploadManager:
             has_ocr_docs=True,
             ocr_count=len(uploaded_docs)
         )
+
+    @staticmethod
+    async def create_mobile_upload(files: List[UploadFile]) -> UploadResult:
+        """
+        Creates a new Opinia from mobile PDF or image upload(s) with automatic OCR.
+
+        Supports two modes:
+        1. Single PDF upload (backward compatible)
+        2. Multiple images → combined into single multi-page PDF
+
+        Strategy: One Opinia per upload with timestamp name.
+        Reuses existing create_empty_opinion and add_documents_to_opinion logic.
+
+        Args:
+            files: List of PDF or image files from mobile device
+
+        Returns:
+            UploadResult with opinion_id and document_id
+        """
+        if not files or len(files) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="No files provided. Upload at least 1 PDF or image."
+            )
+
+        # Validation: max 50 files
+        if len(files) > 50:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many files ({len(files)}). Maximum 50 images per upload."
+            )
+
+        # Step 1: Detect upload type and validate
+        upload_type = await UploadManager._detect_mobile_upload_type(files)
+
+        # Step 2: Get final PDF (either directly or from image conversion)
+        if upload_type == "single_pdf":
+            # Existing flow: single PDF upload
+            final_file = files[0]
+            pdf_filename = final_file.filename
+
+        elif upload_type == "multiple_images":
+            # New flow: convert images to PDF
+            # Generate unique PDF filename
+            unique_pdf_name = f"{uuid.uuid4().hex}.pdf"
+            pdf_path = FILES_DIR / unique_pdf_name
+
+            # Convert images to PDF
+            result = await image_pdf_converter.convert_upload_files_to_pdf(files, pdf_path)
+
+            if not result.success:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to convert images to PDF: {result.error_message}"
+                )
+
+            # Wrap PDF path as UploadFile for existing flow
+            pdf_filename = f"Combined_{len(files)}_images.pdf"
+
+            # Create UploadFile-like object from converted PDF
+            with open(pdf_path, "rb") as f:
+                pdf_content = f.read()
+
+            # Create a temporary file-like object
+            import io
+            final_file = UploadFile(
+                filename=pdf_filename,
+                file=io.BytesIO(pdf_content)
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported upload type: {upload_type}"
+            )
+
+        # Generate timestamp-based opinion name
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        opinion_name = f"Mobile Upload {timestamp}"
+
+        # Step 3: Create empty opinion using existing function
+        opinion_result = UploadManager.create_empty_opinion(
+            sygnatura=None,
+            doc_type="opinia",
+            step="k1",
+            note="Auto-created from mobile upload"
+        )
+
+        if not opinion_result.success:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create opinion: {opinion_result.error_message}"
+            )
+
+        opinion_id = opinion_result.uploaded_doc_ids[0]
+
+        # Update opinion name to include timestamp
+        with Session(engine) as session:
+            opinion = session.get(Document, opinion_id)
+            if opinion:
+                opinion.original_filename = opinion_name
+                session.add(opinion)
+                session.commit()
+
+        # Step 4: Add PDF document to opinion using existing function
+        doc_result = await UploadManager.add_documents_to_opinion(
+            opinion_id=opinion_id,
+            files=[final_file],
+            doc_type="protokol",  # Default type for mobile uploads
+            run_ocr=True  # Always run OCR for mobile uploads
+        )
+
+        if not doc_result.success:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload document: {doc_result.error_message}"
+            )
+
+        # Combine results: [opinion_id, document_id]
+        all_doc_ids = [opinion_id] + doc_result.uploaded_doc_ids
+
+        return UploadResult(
+            success=True,
+            uploaded_doc_ids=all_doc_ids,
+            redirect_url=f"/opinion/{opinion_id}",
+            has_ocr_docs=True,
+            ocr_count=1
+        )
+
+    @staticmethod
+    async def _detect_mobile_upload_type(files: List[UploadFile]) -> str:
+        """
+        Detects mobile upload type and validates files.
+
+        Returns:
+            "single_pdf" or "multiple_images"
+
+        Raises:
+            HTTPException: If validation fails
+        """
+        # Get file extensions
+        extensions = []
+        for file in files:
+            if not file.filename:
+                raise HTTPException(status_code=400, detail="All files must have filenames")
+
+            suffix = check_file_extension(file.filename)
+            extensions.append(suffix.lower())
+
+        # Check for single PDF
+        if len(files) == 1 and extensions[0] == '.pdf':
+            return "single_pdf"
+
+        # Check for multiple images
+        image_extensions = {'.jpg', '.jpeg', '.png', '.heic'}
+
+        # All must be images
+        if all(ext in image_extensions for ext in extensions):
+            # Validate image files can be opened
+            await UploadManager._validate_image_files(files)
+            return "multiple_images"
+
+        # Mixed types or unsupported
+        if '.pdf' in extensions:
+            raise HTTPException(
+                status_code=400,
+                detail="Mixed file types not supported. Upload either: (1) single PDF, or (2) multiple images."
+            )
+
+        # Unsupported file type
+        unsupported = [ext for ext in extensions if ext not in image_extensions and ext != '.pdf']
+        if unsupported:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {unsupported[0]}. Allowed: .pdf, .jpg, .jpeg, .png, .heic"
+            )
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file combination. Upload either: (1) single PDF, or (2) multiple images."
+        )
+
+    @staticmethod
+    async def _validate_image_files(files: List[UploadFile]):
+        """
+        Validates that all files are valid images.
+
+        Raises:
+            HTTPException: If any image is invalid or corrupted
+        """
+        from PIL import Image
+        import tempfile
+
+        # Register HEIF/HEIC support for iPhone photos
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            pass  # HEIC support not available, but JPEG/PNG will still work
+
+        for idx, file in enumerate(files):
+            try:
+                # Read file content
+                content = await file.read()
+
+                # Reset file pointer for later use
+                await file.seek(0)
+
+                # Check file size (max 20MB per image)
+                max_size = 20 * 1024 * 1024  # 20MB
+                if len(content) > max_size:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Image {idx + 1} ('{file.filename}') exceeds 20MB limit"
+                    )
+
+                if len(content) == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Image {idx + 1} ('{file.filename}') is empty"
+                    )
+
+                # Validate image can be opened by Pillow
+                with tempfile.NamedTemporaryFile(delete=True) as tmp:
+                    tmp.write(content)
+                    tmp.flush()
+
+                    # Try to open and verify image
+                    with Image.open(tmp.name) as img:
+                        img.verify()  # Throws if corrupted
+
+            except HTTPException:
+                raise  # Re-raise HTTP exceptions
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Image {idx + 1} ('{file.filename}') is corrupted or invalid: {str(e)}"
+                )
 
     @staticmethod
     def create_empty_opinion(

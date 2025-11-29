@@ -29,3 +29,4 @@ dependencies:
       - qwen-vl-utils>=0.1.5  # Narzędzia dla modelu Qwen
       - easyocr==1.7.1    # (tylko zależność pomocnicza; nie musisz instalować całego docTR)
       - trp==0.0.6        # minimalny parser hOCR → sidecar (opcjonalnie)
+      - pillow-heif       # HEIC/HEIF support for iPhone photos

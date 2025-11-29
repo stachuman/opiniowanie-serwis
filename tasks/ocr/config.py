@@ -53,7 +53,7 @@ logger = setup_logger()
 
 # Ustawienia dla timeout'ów
 DOTS_TIMEOUT_SECONDS = 200  # 
-QWEN_TIMEOUT_SECONDS = 600  # 10 min dla Qwen
+QWEN_TIMEOUT_SECONDS = 300  # 5 min dla Qwen
 OCR_TIMEOUT_SECONDS = DOTS_TIMEOUT_SECONDS if OCR_MODEL_TYPE == "dots" else QWEN_TIMEOUT_SECONDS
 WATCHDOG_TIMEOUT_SECONDS = 1800  # 30 minut na cały dokument
 
