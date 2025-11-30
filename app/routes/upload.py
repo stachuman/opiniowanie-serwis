@@ -261,6 +261,10 @@ async def api_mobile_upload_batch(request: Request):
     raw_images = body.get("images")
     raw_filenames = body.get("filenames")
 
+    # Extract email parameters (optional)
+    email = body.get("email")  # Optional: email address (defaults to config if not provided)
+    email_option = body.get("email_option", "none")  # none/pdf_only/pdf_with_ocr
+
     # Convert to lists if single values (iPhone Shortcuts compatibility)
     # iPhone Shortcuts concatenates multiple items with newlines when using "Get Name" or "Base64 Encode"
     if isinstance(raw_images, str):
@@ -281,9 +285,24 @@ async def api_mobile_upload_batch(request: Request):
     else:
         raise HTTPException(status_code=400, detail=f"'filenames' must be a string or list, got {type(raw_filenames)}")
 
+    # Apply default email from config if not provided
+    from app.config.email_config import DEFAULT_EMAIL, EMAIL_OPTIONS
+    if not email and email_option != "none":
+        email = DEFAULT_EMAIL
+        print(f"   ⚠️  No email provided, using default: {email}")
+
+    # Validate email option
+    if email_option not in EMAIL_OPTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid email_option: '{email_option}'. Valid options: {list(EMAIL_OPTIONS.keys())}"
+        )
+
     print(f"   Images: {len(images)}")
     print(f"   Filenames: {len(filenames)}")
     print(f"   Files: {', '.join(filenames[:5])}{' ...' if len(filenames) > 5 else ''}")
+    print(f"   Email: {email or 'None'}")
+    print(f"   Email option: {email_option}")
     print("=" * 80)
 
     # Validation: array lengths must match
@@ -369,19 +388,42 @@ async def api_mobile_upload_batch(request: Request):
 
     # Delegate to existing upload manager (reuses all validation and conversion logic)
     print(f"🔄 Processing {len(upload_files)} decoded images...")
-    result = await upload_manager.create_mobile_upload(upload_files)
+    result = await upload_manager.create_mobile_upload(
+        upload_files,
+        email=email if email_option == "pdf_with_ocr" else None
+    )
 
     if result.success:
         image_count = len(upload_files)
-        print(f"✅ Base64 batch upload successful: Opinion #{result.uploaded_doc_ids[0]}, Document #{result.uploaded_doc_ids[1] if len(result.uploaded_doc_ids) > 1 else 'N/A'}")
+        document_id = result.uploaded_doc_ids[1] if len(result.uploaded_doc_ids) > 1 else None
+        print(f"✅ Base64 batch upload successful: Opinion #{result.uploaded_doc_ids[0]}, Document #{document_id}")
+
+        # Handle email sending based on email_option
+        email_sent = False
+        if email and email_option == "pdf_only" and document_id:
+            print(f"📧 Sending PDF email to {email}...")
+            from app.email_service import email_service
+            email_sent = email_service.send_pdf_email(document_id, email)
+            if email_sent:
+                print(f"✅ PDF email sent to {email}")
+            else:
+                print(f"❌ Failed to send PDF email to {email}")
+
+        elif email and email_option == "pdf_with_ocr" and document_id:
+            print(f"📧 PDF+OCR email will be sent to {email} after OCR completes")
+            # Email will be passed to OCR process via background task parameter
+            # (already queued with email in background_tasks.py)
+
         print("=" * 80)
 
         return {
             "success": True,
             "opinion_id": result.uploaded_doc_ids[0] if result.uploaded_doc_ids else None,
-            "document_id": result.uploaded_doc_ids[1] if len(result.uploaded_doc_ids) > 1 else None,
+            "document_id": document_id,
             "ocr_queued": result.has_ocr_docs,
             "image_count": image_count,
+            "email_sent": email_sent,
+            "email_pending": email_option == "pdf_with_ocr",
             "message": f"Upload successful. {image_count} images combined into PDF. OCR processing started.",
             "preview_url": result.redirect_url
         }

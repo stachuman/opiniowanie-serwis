@@ -103,7 +103,8 @@ class UploadManager:
             opinion_id: int,
             files: List[UploadFile],
             doc_type: str,
-            run_ocr: bool = False
+            run_ocr: bool = False,
+            email: Optional[str] = None
     ) -> UploadResult:
         """
         Dodaje dokumenty do istniejącej opinii.
@@ -173,7 +174,7 @@ class UploadManager:
 
         # Uruchom OCR dla wgranych dokumentów w tle
         if has_ocr_docs:
-            await UploadManager._enqueue_ocr_documents_nonblocking(uploaded_docs)
+            await UploadManager._enqueue_ocr_documents_nonblocking(uploaded_docs, email=email)
 
         # Przygotuj URL przekierowania z odpowiednim komunikatem
         redirect_url = f"/opinion/{opinion_id}"
@@ -254,7 +255,10 @@ class UploadManager:
         )
 
     @staticmethod
-    async def create_mobile_upload(files: List[UploadFile]) -> UploadResult:
+    async def create_mobile_upload(
+        files: List[UploadFile],
+        email: Optional[str] = None
+    ) -> UploadResult:
         """
         Creates a new Opinia from mobile PDF or image upload(s) with automatic OCR.
 
@@ -267,10 +271,14 @@ class UploadManager:
 
         Args:
             files: List of PDF or image files from mobile device
+            email: Optional email to notify when OCR completes (for pdf_with_ocr option)
 
         Returns:
             UploadResult with opinion_id and document_id
         """
+        if email:
+            print(f"📧 [UPLOAD_MANAGER] Email parameter received: {email}")
+
         if not files or len(files) == 0:
             raise HTTPException(
                 status_code=400,
@@ -360,7 +368,8 @@ class UploadManager:
             opinion_id=opinion_id,
             files=[final_file],
             doc_type="protokol",  # Default type for mobile uploads
-            run_ocr=True  # Always run OCR for mobile uploads
+            run_ocr=True,  # Always run OCR for mobile uploads
+            email=email  # Pass email for pdf_with_ocr option
         )
 
         if not doc_result.success:
@@ -562,18 +571,27 @@ class UploadManager:
                 return special_opinion.id
 
     @staticmethod
-    async def _enqueue_ocr_documents_nonblocking(doc_ids: List[int]):
+    async def _enqueue_ocr_documents_nonblocking(doc_ids: List[int], email: Optional[str] = None):
         """
         Asynchronicznie wstawia dokumenty do kolejki OCR bez blokowania.
+
+        Args:
+            doc_ids: List of document IDs to process
+            email: Optional email to send when OCR completes
         """
         from app.background_tasks import enqueue_ocr_task
+
+        if email:
+            print(f"📧 [UPLOAD_MANAGER] Passing email to OCR queue: {email}")
 
         for doc_id in doc_ids:
             try:
                 with Session(engine) as session:
                     doc = session.get(Document, doc_id)
                     if doc and doc.ocr_status == "pending":
-                        await enqueue_ocr_task(doc_id)
+                        await enqueue_ocr_task(doc_id, email=email)
+                        if email:
+                            print(f"📧 [UPLOAD_MANAGER] Enqueued OCR task for doc {doc_id} with email {email}")
                         await asyncio.sleep(0)  # Oddaj kontrolę
             except Exception as e:
                 print(f"Błąd podczas dodawania dokumentu {doc_id} do kolejki OCR: {str(e)}")

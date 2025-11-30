@@ -72,3 +72,32 @@ DEVICE_STRATEGY = os.getenv("OCR_DEVICE_STRATEGY", "single").lower()
 GPU_MEM_LIMIT_GB = int(os.getenv("OCR_GPU_MEM_LIMIT_GB", "22"))
 
 GPU_SELECT_MODE  = os.getenv("OCR_GPU_SELECT", "auto").lower()
+
+# ========== ORIENTATION DETECTION CONFIGURATION ==========
+# ML-based image orientation detection (replaces EXIF)
+# Model: DuarteBarbosa/deep-image-orientation-detection (EfficientNetV2)
+# Accuracy: 98.82% on validation set
+
+# Model path and feature flag
+ORIENTATION_MODEL_PATH = "DuarteBarbosa/deep-image-orientation-detection"
+ORIENTATION_DETECTION_ENABLED = os.getenv("ORIENTATION_DETECTION_ENABLED", "true").lower() == "true"
+
+# GPU memory threshold (8GB for orientation model vs 22GB for OCR models)
+ORIENTATION_GPU_MEM_THRESHOLD_GB = int(os.getenv("ORIENTATION_GPU_THRESHOLD_GB", "8"))
+
+# Inference timeout (max time per image)
+ORIENTATION_INFERENCE_TIMEOUT_SECONDS = int(os.getenv("ORIENTATION_TIMEOUT_SEC", "5"))
+
+# Minimum confidence threshold
+ORIENTATION_CONFIDENCE_THRESHOLD = float(os.getenv("ORIENTATION_MIN_CONFIDENCE", "0.7"))
+
+# Input size for EfficientNetV2
+ORIENTATION_INPUT_SIZE = 224
+
+# Class mapping: model output → rotation degrees
+ORIENTATION_CLASS_TO_DEGREES = {
+    0: 0,    # No rotation needed
+    1: 90,   # Rotate 90° clockwise
+    2: 180,  # Rotate 180°
+    3: 270   # Rotate 270° clockwise (90° counter-clockwise)
+}

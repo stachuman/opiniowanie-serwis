@@ -52,7 +52,7 @@ def ensure_cuda_cleanup():
         print(f"⚠️ [PROCES] Błąd czyszczenia CUDA: {e}")
 
 
-def process_document_sync(doc_id: int, merge_pages: list[int] = None) -> dict:
+def process_document_sync(doc_id: int, merge_pages: list[int] = None, email: str = None) -> dict:
     """
     Główna funkcja OCR dla ProcessPoolExecutor.
     Używa tylko SQLite - bez SQLModel Session.
@@ -74,6 +74,25 @@ def process_document_sync(doc_id: int, merge_pages: list[int] = None) -> dict:
         result_id = process_document_sqlite(doc_id, merge_pages=merge_pages)
 
         print(f"✅ [PROCES] OCR zakończony dla {doc_id}, txt_doc_id: {result_id}")
+
+        # Check if email should be sent
+        if email:
+            print(f"🔍 [PROCES] Email przekazany przez parametr: {email}")
+            try:
+                print(f"📧 [PROCES] Wysyłam email z wynikami OCR na {email}...")
+
+                # Import and send email
+                from app.email_service import email_service
+                success = email_service.send_pdf_with_ocr_email(doc_id, email)
+
+                if success:
+                    print(f"✅ [PROCES] Email wysłany pomyślnie na {email}")
+                else:
+                    print(f"❌ [PROCES] Nie udało się wysłać emaila na {email}")
+            except Exception as e:
+                print(f"⚠️ [PROCES] Błąd wysyłania emaila: {e}")
+                # Don't fail OCR if email fails - just log the error
+
         return {"success": True, "doc_id": doc_id, "result_id": result_id}
 
     except Exception as e:
@@ -160,6 +179,7 @@ def process_document_sqlite(doc_id: int, merge_pages: list[int] = None) -> int:
         update_document_status(doc_id, "done", "OCR zakończony", 1.0, confidence_score)
 
         print(f"✅ [PROCES] OCR zakończony pomyślnie dla {doc_id}")
+
         return txt_doc_id
 
     except Exception as e:

@@ -63,13 +63,14 @@ def get_ocr_executor():
     return ocr_executor
 
 
-async def enqueue_ocr_task(doc_id: int, merge_pages: list = None):
+async def enqueue_ocr_task(doc_id: int, merge_pages: list = None, email: str = None):
     """
     Dodaje zadanie OCR do kolejki.
 
     Args:
         doc_id: Document ID to process
         merge_pages: Optional list of page numbers for merge mode
+        email: Optional email to send results to after OCR completes
     """
     # Sprawdź czy dokument nie jest już przetwarzany
     if doc_id in active_tasks["ocr"]:
@@ -79,8 +80,8 @@ async def enqueue_ocr_task(doc_id: int, merge_pages: list = None):
     # Dodaj do aktywnych zadań
     active_tasks["ocr"].add(doc_id)
 
-    # Dodaj do kolejki jako tuple (doc_id, merge_pages)
-    task_data = (doc_id, merge_pages)
+    # Dodaj do kolejki jako tuple (doc_id, merge_pages, email)
+    task_data = (doc_id, merge_pages, email)
     await task_queues["ocr"].put(task_data)
 
     if merge_pages:
@@ -106,10 +107,10 @@ def run_ocr_in_process(task_data: tuple) -> dict:
     UWAGA: Ta funkcja nie może używać asyncio ani SQLModel Session!
 
     Args:
-        task_data: Tuple of (doc_id, merge_pages) where merge_pages can be None
+        task_data: Tuple of (doc_id, merge_pages, email) where merge_pages and email can be None
     """
     # Unpack task data
-    doc_id, merge_pages = task_data
+    doc_id, merge_pages, email = task_data
 
     try:
         if merge_pages:
@@ -124,8 +125,8 @@ def run_ocr_in_process(task_data: tuple) -> dict:
         # ✅ UŻYJ NOWEJ SYNC FUNKCJI z pipeline.py
         from tasks.ocr.pipeline import process_document_sync
 
-        # Wywołaj nową sync wrapper function z merge_pages
-        result = process_document_sync(doc_id, merge_pages=merge_pages)
+        # Wywołaj nową sync wrapper function z merge_pages i email
+        result = process_document_sync(doc_id, merge_pages=merge_pages, email=email)
 
         if result["success"]:
             logger.info(f"✅ [PROCES] OCR zakończony dla dokumentu {doc_id}")
@@ -161,7 +162,7 @@ async def ocr_worker():
                 continue
 
             # Unpack task data
-            doc_id, merge_pages = task_data
+            doc_id, merge_pages, email = task_data
 
             if merge_pages:
                 logger.info(f"📤 Przekazuję dokument {doc_id} do procesu OCR (merge: strony {merge_pages})")

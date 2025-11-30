@@ -25,6 +25,32 @@ from tasks.document_manager import document_manager
 router = APIRouter()
 
 
+@router.get("/api/document/{doc_id}/status", name="api_document_status")
+def api_document_status(doc_id: int):
+    """API endpoint for checking document OCR status."""
+    with Session(engine) as session:
+        doc = session.get(Document, doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Check if OCR text document exists
+        from sqlmodel import select
+        ocr_txt_query = select(Document).where(
+            Document.ocr_parent_id == doc_id,
+            Document.doc_type == "ocr_txt"
+        )
+        ocr_txt_doc = session.exec(ocr_txt_query).first()
+
+        return {
+            "id": doc.id,
+            "ocr_status": doc.ocr_status,
+            "ocr_progress": doc.ocr_progress,
+            "ocr_current_page": doc.ocr_current_page,
+            "ocr_total_pages": doc.ocr_total_pages,
+            "has_ocr_text": bool(ocr_txt_doc)
+        }
+
+
 @router.get("/document/{doc_id}/summarize", name="document_summarize_form")
 def document_summarize_form(request: Request, doc_id: int):
     """Formularz do generowania podsumowania dokumentu."""

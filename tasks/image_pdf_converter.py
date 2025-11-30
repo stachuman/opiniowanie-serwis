@@ -48,26 +48,31 @@ class ImageToPDFConverter:
         """Initialize converter with safety limits."""
         Image.MAX_IMAGE_PIXELS = self.MAX_IMAGE_PIXELS
 
-    def _apply_exif_rotation(self, image: Image.Image) -> Image.Image:
+    def _apply_ml_orientation_correction(self, image: Image.Image) -> Image.Image:
         """
-        Apply EXIF-based rotation to image.
+        Apply ML-based orientation detection and correction.
 
-        Uses ImageOps.exif_transpose() which handles all EXIF orientation tags.
-        iPhone embeds EXIF Orientation tag in all photos.
+        IGNORES EXIF orientation data - always uses ML model for detection.
+        Detects 4 orientations: 0°, 90°, 180°, 270° using EfficientNetV2 model.
+
+        Model: DuarteBarbosa/deep-image-orientation-detection
+        Accuracy: 98.82% on validation set
 
         Args:
             image: PIL Image object
 
         Returns:
-            Rotated image (or original if no EXIF or error)
+            Correctly oriented image (or original if detection fails)
         """
         try:
-            rotated = ImageOps.exif_transpose(image)
-            if rotated is not None:
-                return rotated
-            return image
+            from tasks.ocr.orientation_detector import detect_and_correct_orientation
+
+            corrected = detect_and_correct_orientation(image)
+            return corrected
+
         except Exception as e:
-            logger.warning(f"EXIF rotation failed, using original orientation: {e}")
+            logger.error(f"ML orientation detection failed: {e}")
+            # Fallback: return image as-is (don't use EXIF as fallback per requirements!)
             return image
 
     def _prepare_image_for_pdf(self, image: Image.Image) -> Image.Image:
@@ -75,7 +80,7 @@ class ImageToPDFConverter:
         Prepare image for PDF conversion.
 
         Steps:
-        1. Apply EXIF rotation
+        1. Apply ML orientation correction (replaces EXIF rotation)
         2. Convert RGBA → RGB (PDF doesn't support transparency)
         3. Downscale if exceeds MAX_IMAGE_DIMENSION
 
@@ -85,8 +90,8 @@ class ImageToPDFConverter:
         Returns:
             Prepared image ready for PDF
         """
-        # Step 1: Apply EXIF rotation
-        image = self._apply_exif_rotation(image)
+        # Step 1: Apply ML orientation correction
+        image = self._apply_ml_orientation_correction(image)
 
         # Step 2: Convert RGBA to RGB with white background
         if image.mode in ('RGBA', 'LA', 'P'):
