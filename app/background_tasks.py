@@ -63,7 +63,7 @@ def get_ocr_executor():
     return ocr_executor
 
 
-async def enqueue_ocr_task(doc_id: int, merge_pages: list = None, email: str = None):
+async def enqueue_ocr_task(doc_id: int, merge_pages: list = None, email: str = None, email_option: str = "none"):
     """
     Dodaje zadanie OCR do kolejki.
 
@@ -71,6 +71,7 @@ async def enqueue_ocr_task(doc_id: int, merge_pages: list = None, email: str = N
         doc_id: Document ID to process
         merge_pages: Optional list of page numbers for merge mode
         email: Optional email to send results to after OCR completes
+        email_option: Email option type: "none", "pdf_only", or "pdf_with_ocr"
     """
     # Sprawdź czy dokument nie jest już przetwarzany
     if doc_id in active_tasks["ocr"]:
@@ -80,8 +81,8 @@ async def enqueue_ocr_task(doc_id: int, merge_pages: list = None, email: str = N
     # Dodaj do aktywnych zadań
     active_tasks["ocr"].add(doc_id)
 
-    # Dodaj do kolejki jako tuple (doc_id, merge_pages, email)
-    task_data = (doc_id, merge_pages, email)
+    # Dodaj do kolejki jako tuple (doc_id, merge_pages, email, email_option)
+    task_data = (doc_id, merge_pages, email, email_option)
     await task_queues["ocr"].put(task_data)
 
     if merge_pages:
@@ -107,10 +108,10 @@ def run_ocr_in_process(task_data: tuple) -> dict:
     UWAGA: Ta funkcja nie może używać asyncio ani SQLModel Session!
 
     Args:
-        task_data: Tuple of (doc_id, merge_pages, email) where merge_pages and email can be None
+        task_data: Tuple of (doc_id, merge_pages, email, email_option) where merge_pages, email, and email_option can be None/default
     """
     # Unpack task data
-    doc_id, merge_pages, email = task_data
+    doc_id, merge_pages, email, email_option = task_data
 
     try:
         if merge_pages:
@@ -125,8 +126,8 @@ def run_ocr_in_process(task_data: tuple) -> dict:
         # ✅ UŻYJ NOWEJ SYNC FUNKCJI z pipeline.py
         from tasks.ocr.pipeline import process_document_sync
 
-        # Wywołaj nową sync wrapper function z merge_pages i email
-        result = process_document_sync(doc_id, merge_pages=merge_pages, email=email)
+        # Wywołaj nową sync wrapper function z merge_pages, email, and email_option
+        result = process_document_sync(doc_id, merge_pages=merge_pages, email=email, email_option=email_option)
 
         if result["success"]:
             logger.info(f"✅ [PROCES] OCR zakończony dla dokumentu {doc_id}")
@@ -145,6 +146,14 @@ def run_ocr_in_process(task_data: tuple) -> dict:
 
         return {"success": False, "error": error_msg, "doc_id": doc_id}
 
+    finally:
+        # Free GPU memory so all GPUs are available for the next OCR task
+        try:
+            from tasks.ocr.models import cleanup_models
+            cleanup_models()
+        except Exception as cleanup_err:
+            logger.warning(f"GPU cleanup error: {cleanup_err}")
+
 
 # ✅ POPRAWIONY: Asynchroniczny worker OCR
 async def ocr_worker():
@@ -162,7 +171,7 @@ async def ocr_worker():
                 continue
 
             # Unpack task data
-            doc_id, merge_pages, email = task_data
+            doc_id, merge_pages, email, email_option = task_data
 
             if merge_pages:
                 logger.info(f"📤 Przekazuję dokument {doc_id} do procesu OCR (merge: strony {merge_pages})")

@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 
 # Lokalne importy
@@ -163,24 +163,41 @@ async def quick_ocr(request: Request, files: list[UploadFile] = File(...)):
 # ==================== MOBILE API ENDPOINT ====================
 
 @router.post("/api/upload/mobile", name="api_mobile_upload")
-async def api_mobile_upload(files: list[UploadFile] = File(...)):
+async def api_mobile_upload(
+    files: list[UploadFile] = File(...),
+    opinia_name: Optional[str] = Form(None)
+):
     """
     Mobile-friendly API endpoint for uploading files from iPhone.
 
-    Supports two modes:
+    Supports three modes:
     1. Single PDF upload (backward compatible)
     2. Multiple images → automatically combined into single multi-page PDF
+    3. Multiple videos → first frame extracted and combined into PDF
+
+    Supported formats:
+    - PDF: .pdf
+    - Images: .jpg, .jpeg, .png, .heic
+    - Videos: .mov, .mp4 (extracts first frame)
 
     Automatically:
     - Creates new Opinia with timestamp name
     - Uploads/converts files to PDF
     - Queues OCR processing
 
+    Args:
+        files: List of PDF, image, or video files
+        opinia_name: Optional name for the opinion (sets sygnatura field).
+                    If not provided, sygnatura will be None (shows "Brak informacji, kogo dotyczy")
+
     Returns JSON with document details for mobile consumption.
     """
+    # Log opinia_name if provided
+    if opinia_name:
+        print(f"📝 [API] opinia_name parameter received: '{opinia_name}'")
 
     # Delegate to upload manager for mobile upload (handles validation)
-    result = await upload_manager.create_mobile_upload(files)
+    result = await upload_manager.create_mobile_upload(files, opinion_name=opinia_name)
 
     if result.success:
         # Determine if multiple images were converted
@@ -219,7 +236,7 @@ async def api_mobile_upload_batch(request: Request):
     """
     Base64 batch upload endpoint for iPhone Shortcuts.
 
-    Accepts multiple Base64-encoded images in JSON format and combines them
+    Accepts multiple Base64-encoded images/videos in JSON format and combines them
     into a single multi-page PDF with automatic OCR processing.
 
     This endpoint solves iPhone Shortcuts limitation where multipart/form-data
@@ -228,14 +245,14 @@ async def api_mobile_upload_batch(request: Request):
     Request body:
     {
         "images": ["base64_string_1", "base64_string_2", ...],
-        "filenames": ["IMG_0001.jpg", "IMG_0002.jpg", ...]
+        "filenames": ["IMG_0001.jpg", "IMG_0002.mov", ...]
     }
 
     Validation:
-    - 1-50 images required
+    - 1-50 files required
     - Arrays must have equal length
-    - Supported formats: .jpg, .jpeg, .png, .heic
-    - Max 30MB per Base64 string (~22MB original image)
+    - Supported formats: .jpg, .jpeg, .png, .heic, .mov, .mp4
+    - Max 30MB per Base64 string (~22MB original for images, ~22MB for short videos)
 
     Returns JSON with opinion and document IDs.
     """
@@ -264,6 +281,11 @@ async def api_mobile_upload_batch(request: Request):
     # Extract email parameters (optional)
     email = body.get("email")  # Optional: email address (defaults to config if not provided)
     email_option = body.get("email_option", "none")  # none/pdf_only/pdf_with_ocr
+
+    # Extract opinia_name parameter (optional)
+    opinion_name = body.get("opinia_name")  # Optional: person name for opinion (sets sygnatura)
+    if opinion_name:
+        print(f"📝 [BATCH] opinia_name parameter received: '{opinion_name}'")
 
     # Convert to lists if single values (iPhone Shortcuts compatibility)
     # iPhone Shortcuts concatenates multiple items with newlines when using "Get Name" or "Base64 Encode"
@@ -326,13 +348,13 @@ async def api_mobile_upload_batch(request: Request):
         )
 
     # Validation: file extensions
-    allowed_extensions = {'.jpg', '.jpeg', '.png', '.heic'}
+    allowed_extensions = {'.jpg', '.jpeg', '.png', '.heic', '.mov', '.mp4'}
     for filename in filenames:
         ext = Path(filename).suffix.lower()
         if ext not in allowed_extensions:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type: {ext} in '{filename}'. Allowed: .jpg, .jpeg, .png, .heic"
+                detail=f"Unsupported file type: {ext} in '{filename}'. Allowed: .jpg, .jpeg, .png, .heic, .mov, .mp4"
             )
 
     # Decode Base64 and create UploadFile objects
@@ -390,7 +412,9 @@ async def api_mobile_upload_batch(request: Request):
     print(f"🔄 Processing {len(upload_files)} decoded images...")
     result = await upload_manager.create_mobile_upload(
         upload_files,
-        email=email if email_option == "pdf_with_ocr" else None
+        email=email if email_option != "none" else None,  # Pass email for both pdf_only and pdf_with_ocr
+        email_option=email_option,  # Pass option type to control when email is sent
+        opinion_name=opinion_name
     )
 
     if result.success:
@@ -399,15 +423,12 @@ async def api_mobile_upload_batch(request: Request):
         print(f"✅ Base64 batch upload successful: Opinion #{result.uploaded_doc_ids[0]}, Document #{document_id}")
 
         # Handle email sending based on email_option
+        # BOTH pdf_only and pdf_with_ocr are handled in OCR pipeline after correction
         email_sent = False
         if email and email_option == "pdf_only" and document_id:
-            print(f"📧 Sending PDF email to {email}...")
-            from app.email_service import email_service
-            email_sent = email_service.send_pdf_email(document_id, email)
-            if email_sent:
-                print(f"✅ PDF email sent to {email}")
-            else:
-                print(f"❌ Failed to send PDF email to {email}")
+            print(f"📧 PDF email will be sent to {email} after correction in pipeline")
+            # Email is passed to OCR process which will send after correction
+            # (same as pdf_with_ocr but without OCR text in email)
 
         elif email and email_option == "pdf_with_ocr" and document_id:
             print(f"📧 PDF+OCR email will be sent to {email} after OCR completes")

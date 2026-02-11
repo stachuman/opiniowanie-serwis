@@ -24,6 +24,10 @@ from PIL import (
 # Umożliwia wczytywanie częściowo uszkodzonych/progresywnych JPEG
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+# Apply shared PIL pixel limit from utils (must happen before any Image.open)
+from .utils import MAX_IMAGE_PIXELS_SAFE, rescale_oversized_pages
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS_SAFE
+
 from .config import logger, DPI, MAX_IMAGE_DIMENSION, MIN_IMAGE_DIMENSION
 
 # =========================
@@ -65,9 +69,9 @@ def _ensure_reasonable_dimensions(image: Image.Image) -> None:
     w, h = image.size
     long_edge = max(w, h)
     if long_edge < RECOMMENDED_MIN_LONG_EDGE:
-        logger.info(
-            f"[PREPROCESS] Dłuższy bok ma tylko {long_edge}px. "
-            f"Rozważ umiarkowane powiększenie do ~{RECOMMENDED_MIN_LONG_EDGE}px dla drobnych fontów."
+        logger.debug(
+            "Long edge only %dpx (recommended %dpx for small fonts)",
+            long_edge, RECOMMENDED_MIN_LONG_EDGE,
         )
 
 
@@ -301,39 +305,36 @@ def preprocess_image(
         image_path = str(image_path)
         image = Image.open(image_path)
         original_size = image.size
-        logger.info(f"[PREPROCESS] {image_path} size={original_size[0]}x{original_size[1]}")
-        print(f"🖼️ [PREPROCESS] Oryginalny rozmiar: {original_size[0]}x{original_size[1]}")
+        logger.debug("Preprocess %s size=%dx%d", image_path, original_size[0], original_size[1])
 
         # EXIF (rotacja + strip)
         if not skip_exif_rotation:
             try:
                 image = _exif_transpose_strip(image)
-                print("🖼️ [PREPROCESS] EXIF transpose + strip")
+                logger.debug("EXIF transpose applied")
             except Exception as e:
-                print(f"⚠️ [PREPROCESS] Błąd EXIF transpose: {e}")
-                logger.warning(f"[PREPROCESS] Błąd EXIF transpose: {e}")
+                logger.warning("EXIF transpose failed: %s", e)
         else:
-            print("🖼️ [PREPROCESS] Pominięto EXIF transpose")
+            logger.debug("EXIF transpose skipped")
 
         # RGB dla spójności
         if image.mode == "RGBA":
             bg = Image.new("RGB", image.size, (255, 255, 255))
             bg.paste(image, mask=image.split()[3])
             image = bg
-            print("🖼️ [PREPROCESS] RGBA -> RGB (białe tło)")
+            logger.debug("RGBA -> RGB (white background)")
         elif image.mode != "RGB":
             image = image.convert("RGB")
-            print(f"🖼️ [PREPROCESS] Konwersja -> RGB")
+            logger.debug("Converted to RGB")
 
         # Skalowanie w dół (bez upscalingu)
         before = image.size
         image = _safe_downscale(image, MAX_IMAGE_DIMENSION if isinstance(MAX_IMAGE_DIMENSION, int) else None)
         after = image.size
         if before != after:
-            print(f"🖼️ [PREPROCESS] Skalowano do: {after[0]}x{after[1]}")
-            logger.info(f"[PREPROCESS] Scale {before} -> {after}")
+            logger.debug("Scaled %s -> %s", before, after)
         else:
-            print(f"🖼️ [PREPROCESS] Rozmiar bez zmian: {after[0]}x{after[1]}")
+            logger.debug("Size unchanged: %s", after)
 
         _ensure_reasonable_dimensions(image)
 
@@ -347,9 +348,7 @@ def preprocess_image(
 
         final_size = processed.size
         processed.save(tmp_path, "PNG", optimize=True)
-        print(f"🖼️ [PREPROCESS] Finalny rozmiar: {final_size[0]}x{final_size[1]}")
-        print(f"🖼️ [PREPROCESS] Zapisano do: {tmp_path}")
-        logger.info(f"[PREPROCESS] OK: {final_size} -> {tmp_path}")
+        logger.debug("Preprocessed: %s -> %s", final_size, tmp_path)
 
         return tmp_path
 
@@ -368,8 +367,10 @@ def extract_pages_from_pdf(pdf_path: str | Path, max_batch_size: int = 5) -> Lis
 
         pages = convert_from_path(str(pdf_path), dpi=DPI)
         total_pages = len(pages)
-        logger.info(f"[PDF] Stron: {total_pages} (DPI={DPI})")
-        print(f"📄 [PDF] Stron: {total_pages} (DPI={DPI})")
+        logger.debug("PDF pages: %d (DPI=%d)", total_pages, DPI)
+
+        # Safety check: rescale oversized pages to prevent decompression bomb errors
+        pages = rescale_oversized_pages(pages, "PDF")
 
         batches: List[List[str]] = []
         for i in range(0, total_pages, max_batch_size):

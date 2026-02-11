@@ -29,6 +29,9 @@ ALLOWED_EXTENSIONS = {
     '.tiff': 'image/tiff',
     '.bmp': 'image/bmp',
     '.webp': 'image/webp',
+    # Wideo (dla iPhone mobile upload - pierwsza klatka jest wyodrębniana)
+    '.mov': 'video/quicktime',
+    '.mp4': 'video/mp4',
     # Dokumenty tekstowe
     '.txt': 'text/plain',
     # Dokumenty Word

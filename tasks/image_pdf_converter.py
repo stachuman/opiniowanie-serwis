@@ -1,7 +1,17 @@
 # tasks/image_pdf_converter.py
 """
-Converts multiple images to a single multi-page PDF with EXIF rotation.
-Used for iPhone mobile upload endpoint to combine photo sequences.
+Converts multiple images/videos to a single multi-page PDF (RAW - no correction).
+
+Used for iPhone mobile upload endpoint to combine photo/video sequences.
+Supports: .jpg, .jpeg, .png, .heic (images) and .mov, .mp4 (videos - extracts first frame)
+
+WORKFLOW:
+1. Images/videos → RAW PDF (NO orientation/deskew correction)
+2. OCR Pipeline → 3-stage correction (PRE-DESKEW → ORIENTATION → POST-DESKEW)
+3. OCR Pipeline → Save corrected PDF (can be sent to iPhone)
+4. OCR Pipeline → Process corrected pages
+
+This prevents double-processing and ensures correction happens once in the pipeline.
 """
 
 import logging
@@ -12,6 +22,7 @@ from typing import List, Optional
 
 from PIL import Image, ImageOps
 from fastapi import UploadFile
+from tasks.ocr.utils import extract_frame_from_video, MAX_IMAGE_PIXELS_SAFE
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -37,50 +48,51 @@ class ConversionResult:
 
 
 class ImageToPDFConverter:
-    """Converts multiple images to a single multi-page PDF."""
+    """Converts multiple images/videos to a single multi-page PDF (RAW - no correction).
+
+    Creates RAW PDF without orientation or deskew correction.
+    Correction is applied later in the OCR pipeline (3-stage process).
+
+    Supports image formats: .jpg, .jpeg, .png, .heic
+    Supports video formats: .mov, .mp4 (extracts first frame using ffmpeg)
+    """
 
     # Configuration constants
     MAX_IMAGE_DIMENSION = 4096  # Prevent memory issues
     PDF_RESOLUTION_DPI = 100.0
-    MAX_IMAGE_PIXELS = 178956970  # Prevent zip bombs
 
     def __init__(self):
         """Initialize converter with safety limits."""
-        Image.MAX_IMAGE_PIXELS = self.MAX_IMAGE_PIXELS
+        Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS_SAFE
 
     def _apply_ml_orientation_correction(self, image: Image.Image) -> Image.Image:
         """
-        Apply ML-based orientation detection and correction.
+        NO-OP: Orientation correction removed from PDF creation step.
 
-        IGNORES EXIF orientation data - always uses ML model for detection.
-        Detects 4 orientations: 0°, 90°, 180°, 270° using EfficientNetV2 model.
+        Workflow change: PDFs are created WITHOUT orientation/deskew correction.
+        Correction happens later in the OCR pipeline (3-stage process).
 
-        Model: DuarteBarbosa/deep-image-orientation-detection
-        Accuracy: 98.82% on validation set
+        This prevents double-processing and ensures correction happens in one place:
+        1. iPhone → Raw PDF (no correction)
+        2. Pipeline → Apply 3-stage correction (PRE-DESKEW → ORIENTATION → POST-DESKEW)
+        3. OCR → Process corrected pages
 
         Args:
             image: PIL Image object
 
         Returns:
-            Correctly oriented image (or original if detection fails)
+            Original image (unchanged)
         """
-        try:
-            from tasks.ocr.orientation_detector import detect_and_correct_orientation
-
-            corrected = detect_and_correct_orientation(image)
-            return corrected
-
-        except Exception as e:
-            logger.error(f"ML orientation detection failed: {e}")
-            # Fallback: return image as-is (don't use EXIF as fallback per requirements!)
-            return image
+        # RULES.md Rule #1: Keep it simple - correction happens in pipeline, not here
+        logger.info("Skipping orientation correction during PDF creation (handled in OCR pipeline)")
+        return image
 
     def _prepare_image_for_pdf(self, image: Image.Image) -> Image.Image:
         """
-        Prepare image for PDF conversion.
+        Prepare image for PDF conversion (RAW - no correction).
 
         Steps:
-        1. Apply ML orientation correction (replaces EXIF rotation)
+        1. SKIP orientation correction (handled in OCR pipeline)
         2. Convert RGBA → RGB (PDF doesn't support transparency)
         3. Downscale if exceeds MAX_IMAGE_DIMENSION
 
@@ -90,8 +102,9 @@ class ImageToPDFConverter:
         Returns:
             Prepared image ready for PDF
         """
-        # Step 1: Apply ML orientation correction
-        image = self._apply_ml_orientation_correction(image)
+        # Step 1: SKIP ML orientation correction (happens in OCR pipeline)
+        # No correction applied here - PDF is created as-is
+        # image = self._apply_ml_orientation_correction(image)  # REMOVED
 
         # Step 2: Convert RGBA to RGB with white background
         if image.mode in ('RGBA', 'LA', 'P'):
@@ -130,10 +143,12 @@ class ImageToPDFConverter:
         output_path: Path
     ) -> ConversionResult:
         """
-        Convert multiple images to a single multi-page PDF.
+        Convert multiple images/videos to a single multi-page PDF.
+
+        For video files (.mov, .mp4), extracts first frame using ffmpeg.
 
         Args:
-            image_paths: List of paths to image files
+            image_paths: List of paths to image or video files
             output_path: Path where PDF should be saved
 
         Returns:
@@ -147,11 +162,21 @@ class ImageToPDFConverter:
 
         try:
             processed_images = []
+            extracted_frames = []  # Track extracted frames for cleanup
 
-            # Process all images
+            # Process all images/videos
             for idx, img_path in enumerate(image_paths):
                 try:
-                    logger.info(f"Processing image {idx + 1}/{len(image_paths)}: {img_path.name}")
+                    logger.info(f"Processing file {idx + 1}/{len(image_paths)}: {img_path.name}")
+
+                    # Check if file is a video (MOV/MP4)
+                    file_ext = img_path.suffix.lower()
+                    if file_ext in {'.mov', '.mp4'}:
+                        # Extract first frame from video
+                        logger.info(f"  → Video file detected, extracting first frame...")
+                        frame_path = extract_frame_from_video(img_path)
+                        extracted_frames.append(frame_path)  # Track for cleanup
+                        img_path = frame_path  # Use extracted frame
 
                     # Open and prepare image
                     with Image.open(img_path) as img:
@@ -159,10 +184,13 @@ class ImageToPDFConverter:
                         processed_images.append(prepared)
 
                 except Exception as e:
-                    logger.error(f"Failed to process image {img_path.name}: {e}")
+                    logger.error(f"Failed to process file {img_path.name}: {e}")
+                    # Clean up extracted frames on error
+                    for frame in extracted_frames:
+                        frame.unlink(missing_ok=True)
                     return ConversionResult(
                         success=False,
-                        error_message=f"Failed to process image '{img_path.name}': {str(e)}"
+                        error_message=f"Failed to process file '{img_path.name}': {str(e)}"
                     )
 
             if not processed_images:
@@ -187,6 +215,11 @@ class ImageToPDFConverter:
 
             logger.info(f"Successfully created PDF: {output_path}")
 
+            # Clean up extracted video frames
+            for frame in extracted_frames:
+                frame.unlink(missing_ok=True)
+                logger.info(f"  → Cleaned up extracted frame: {frame.name}")
+
             return ConversionResult(
                 success=True,
                 pdf_path=output_path,
@@ -195,6 +228,9 @@ class ImageToPDFConverter:
 
         except Exception as e:
             logger.error(f"PDF conversion failed: {e}")
+            # Clean up extracted frames on error
+            for frame in extracted_frames:
+                frame.unlink(missing_ok=True)
             return ConversionResult(
                 success=False,
                 error_message=f"PDF conversion failed: {str(e)}"

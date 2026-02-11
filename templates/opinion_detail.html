@@ -180,7 +180,7 @@
           </thead>
           <tbody>
             {% for doc in related_docs %}
-            <tr data-ocr-status="{{ doc.ocr_status or 'none' }}">
+            <tr data-ocr-status="{{ doc.ocr_status or 'none' }}" class="clickable-row" data-href="{% if doc.mime_type == 'application/pdf' %}{{ url_for('document_pdf_viewer', doc_id=doc.id) }}{% elif doc.mime_type and doc.mime_type.startswith('image/') %}{{ url_for('document_image_viewer', doc_id=doc.id) }}{% else %}{{ url_for('document_detail', doc_id=doc.id) }}{% endif %}" style="cursor: pointer;">
               <td>
                 {% if doc.mime_type and doc.mime_type.startswith('image/') %}
                   <i class="bi bi-file-earmark-image text-info" title="Obraz"></i>
@@ -492,6 +492,15 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
   }
+
+  // Clickable document rows — navigate to viewer on row click
+  document.querySelectorAll('tr.clickable-row[data-href]').forEach(row => {
+    row.addEventListener('click', function(e) {
+      // Don't navigate if clicking on interactive elements
+      if (e.target.closest('a, button, input, select, textarea')) return;
+      window.location.href = this.dataset.href;
+    });
+  });
 
   console.log('Opinion Detail - delete functionality initialized');
 });

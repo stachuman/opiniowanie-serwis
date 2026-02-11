@@ -165,7 +165,6 @@ scrollToPageInText(pageNumber) {
       }
 
       switch (e.key) {
-        case 'ArrowLeft':
         case 'PageUp':
           if (window.ocrViewer) {
             e.preventDefault();
@@ -173,9 +172,7 @@ scrollToPageInText(pageNumber) {
           }
           break;
 
-        case 'ArrowRight':
         case 'PageDown':
-        case ' ': // Space
           if (window.ocrViewer) {
             e.preventDefault();
             window.ocrViewer.nextPage();

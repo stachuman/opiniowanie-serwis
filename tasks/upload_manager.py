@@ -5,12 +5,15 @@ Zawiera całą logikę biznesową przeniesioną z routes/upload.py.
 """
 
 import asyncio
+import logging
 import uuid
 import shutil
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from fastapi import UploadFile, HTTPException
 from sqlmodel import Session
@@ -23,6 +26,7 @@ from app.document_utils import (
     get_content_type_from_mime
 )
 from tasks.image_pdf_converter import image_pdf_converter
+from tasks.ocr.utils import extract_frame_from_video
 
 
 @dataclass
@@ -104,7 +108,8 @@ class UploadManager:
             files: List[UploadFile],
             doc_type: str,
             run_ocr: bool = False,
-            email: Optional[str] = None
+            email: Optional[str] = None,
+            email_option: str = "none"
     ) -> UploadResult:
         """
         Dodaje dokumenty do istniejącej opinii.
@@ -118,6 +123,12 @@ class UploadManager:
 
         uploaded_docs = []
         has_ocr_docs = False
+
+        # Merge multiple PDFs into one
+        if len(files) > 1:
+            pdf_files = [f for f in files if f.filename and f.filename.lower().endswith('.pdf')]
+            if len(pdf_files) > 1:
+                files = await UploadManager._merge_pdf_uploads(files)
 
         # Przetwarzanie wgranych plików
         for file in files:
@@ -143,9 +154,16 @@ class UploadManager:
             is_main = content_type == "opinion" and doc_type == "Opinia"
             parent_id = None if is_main else opinion_id
 
+            # Try extracting embedded text from PDF before queueing OCR
+            embedded_text = None
+            if actual_mime_type == 'application/pdf':
+                embedded_text = UploadManager._extract_pdf_text(dest)
+
             # Ustal właściwy status OCR
             ocr_status = "none"
-            if run_ocr and content_type != "opinion":
+            if embedded_text:
+                ocr_status = "done"  # text extracted from PDF, no OCR needed
+            elif run_ocr and content_type != "opinion":
                 ocr_status = "pending"
                 has_ocr_docs = True
 
@@ -170,11 +188,34 @@ class UploadManager:
                 )
                 session.add(new_doc)
                 session.commit()
-                uploaded_docs.append(new_doc.id)
+                doc_id = new_doc.id
+                uploaded_docs.append(doc_id)
+
+            # Save extracted text as OCR result
+            if embedded_text and doc_id:
+                try:
+                    from tasks.ocr.pipeline import save_ocr_results, update_document_status
+                    with Session(engine) as session:
+                        opinion = session.get(Document, opinion_id)
+                    save_ocr_results(
+                        doc_id, embedded_text, 1.0,
+                        file.filename, opinion.sygnatura or "", opinion.step or "k1"
+                    )
+                    # save_ocr_results leaves status at "running" 0.9 — finalize it
+                    update_document_status(doc_id, "done", "Tekst wyodrębniony z PDF", 1.0)
+                    logger.info("PDF text extracted for doc %d (%d chars)", doc_id, len(embedded_text))
+                except Exception as e:
+                    logger.warning("Failed to save extracted PDF text for doc %d: %s", doc_id, e)
+                    # Reset status so user can trigger OCR manually
+                    try:
+                        from tasks.ocr.pipeline import update_document_status
+                        update_document_status(doc_id, "none", "")
+                    except Exception:
+                        pass
 
         # Uruchom OCR dla wgranych dokumentów w tle
         if has_ocr_docs:
-            await UploadManager._enqueue_ocr_documents_nonblocking(uploaded_docs, email=email)
+            await UploadManager._enqueue_ocr_documents_nonblocking(uploaded_docs, email=email, email_option=email_option)
 
         # Przygotuj URL przekierowania z odpowiednim komunikatem
         redirect_url = f"/opinion/{opinion_id}"
@@ -188,6 +229,101 @@ class UploadManager:
             has_ocr_docs=has_ocr_docs,
             ocr_count=len([doc_id for doc_id in uploaded_docs if has_ocr_docs])
         )
+
+    @staticmethod
+    def _extract_pdf_text(pdf_path: Path, min_chars_per_page: int = 50) -> str | None:
+        """Extract embedded text from a PDF file using PyMuPDF.
+
+        Returns formatted text with page separators (=== Strona X ===)
+        or None if the PDF has no meaningful embedded text.
+        """
+        import fitz
+
+        try:
+            doc = fitz.open(str(pdf_path))
+            total_pages = len(doc)
+            if total_pages == 0:
+                doc.close()
+                return None
+
+            page_texts = []
+            pages_with_text = 0
+
+            for i in range(total_pages):
+                page = doc[i]
+                text = page.get_text("text").strip()
+                page_texts.append(text)
+                if len(text) >= min_chars_per_page:
+                    pages_with_text += 1
+
+            doc.close()
+
+            # Require at least half the pages to have meaningful text
+            if pages_with_text < max(1, total_pages * 0.5):
+                return None
+
+            # Build text with page separators (same format as OCR pipeline)
+            parts = []
+            for i, text in enumerate(page_texts, 1):
+                if i > 1:
+                    parts.append("\n\n")
+                parts.append(f"=== Strona {i} ===\n\n")
+                parts.append(text)
+
+            return ''.join(parts).strip()
+
+        except Exception as e:
+            logger.warning("PDF text extraction failed for %s: %s", pdf_path, e)
+            return None
+
+    @staticmethod
+    async def _merge_pdf_uploads(files: List[UploadFile]) -> List[UploadFile]:
+        """Merge multiple PDF files into a single PDF, keeping non-PDFs separate.
+
+        Returns a new file list where all PDFs are replaced by one merged PDF.
+        """
+        import fitz  # PyMuPDF
+        import io
+
+        pdf_files = []
+        other_files = []
+        for f in files:
+            if f.filename and f.filename.lower().endswith('.pdf'):
+                pdf_files.append(f)
+            else:
+                other_files.append(f)
+
+        if len(pdf_files) < 2:
+            return files  # nothing to merge
+
+        first_name = Path(pdf_files[0].filename).stem
+        merged_name = f"{first_name}_+{len(pdf_files)-1}_merged.pdf"
+
+        try:
+            merged_doc = fitz.open()
+            for pf in pdf_files:
+                content = await pf.read()
+                src = fitz.open(stream=content, filetype="pdf")
+                merged_doc.insert_pdf(src)
+                src.close()
+
+            buf = io.BytesIO()
+            merged_doc.save(buf, garbage=4, deflate=True)
+            total_pages = len(merged_doc)
+            merged_doc.close()
+            buf.seek(0)
+
+            logger.info("Merged %d PDFs into %s (%d pages)",
+                        len(pdf_files), merged_name, total_pages)
+
+            merged_upload = UploadFile(filename=merged_name, file=buf)
+            return [merged_upload] + other_files
+
+        except Exception as e:
+            logger.error("PDF merge failed: %s — uploading files separately", e)
+            for pf in pdf_files:
+                await pf.seek(0)
+            return files
 
     @staticmethod
     async def create_quick_ocr_documents(files: List[UploadFile]) -> UploadResult:
@@ -257,7 +393,9 @@ class UploadManager:
     @staticmethod
     async def create_mobile_upload(
         files: List[UploadFile],
-        email: Optional[str] = None
+        email: Optional[str] = None,
+        email_option: str = "none",
+        opinion_name: Optional[str] = None
     ) -> UploadResult:
         """
         Creates a new Opinia from mobile PDF or image upload(s) with automatic OCR.
@@ -271,7 +409,10 @@ class UploadManager:
 
         Args:
             files: List of PDF or image files from mobile device
-            email: Optional email to notify when OCR completes (for pdf_with_ocr option)
+            email: Optional email to notify when processing completes
+            email_option: Email option type: "none", "pdf_only", or "pdf_with_ocr"
+            opinion_name: Optional name for the opinion (sets sygnatura field).
+                         If not provided, defaults to "Mobile Upload {timestamp}"
 
         Returns:
             UploadResult with opinion_id and document_id
@@ -335,13 +476,27 @@ class UploadManager:
                 detail=f"Unsupported upload type: {upload_type}"
             )
 
-        # Generate timestamp-based opinion name
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        opinion_name = f"Mobile Upload {timestamp}"
+        # RULES.md: Validate explicitly - opinion_name if provided (Rule #3)
+        if opinion_name:
+            opinion_name = opinion_name.strip()
+            if not opinion_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="OpiniaName cannot be empty or whitespace only"
+                )
+            print(f"📝 [UPLOAD_MANAGER] Using custom opinion name (sygnatura): '{opinion_name}'")
+            sygnatura_value = opinion_name
+            display_name = f"Mobile Upload {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        else:
+            # Default: sygnatura=None (displays "Brak informacji, kogo dotyczy")
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            display_name = f"Mobile Upload {timestamp}"
+            sygnatura_value = None
+            print(f"📝 [UPLOAD_MANAGER] Using default: sygnatura=None (shows 'Brak informacji, kogo dotyczy')")
 
         # Step 3: Create empty opinion using existing function
         opinion_result = UploadManager.create_empty_opinion(
-            sygnatura=None,
+            sygnatura=sygnatura_value,
             doc_type="opinia",
             step="k1",
             note="Auto-created from mobile upload"
@@ -355,11 +510,11 @@ class UploadManager:
 
         opinion_id = opinion_result.uploaded_doc_ids[0]
 
-        # Update opinion name to include timestamp
+        # Update opinion original_filename (the title shown in opinion list)
         with Session(engine) as session:
             opinion = session.get(Document, opinion_id)
             if opinion:
-                opinion.original_filename = opinion_name
+                opinion.original_filename = display_name
                 session.add(opinion)
                 session.commit()
 
@@ -369,7 +524,8 @@ class UploadManager:
             files=[final_file],
             doc_type="protokol",  # Default type for mobile uploads
             run_ocr=True,  # Always run OCR for mobile uploads
-            email=email  # Pass email for pdf_with_ocr option
+            email=email,  # Pass email for both pdf_only and pdf_with_ocr
+            email_option=email_option  # Pass option to control email timing
         )
 
         if not doc_result.success:
@@ -413,12 +569,12 @@ class UploadManager:
         if len(files) == 1 and extensions[0] == '.pdf':
             return "single_pdf"
 
-        # Check for multiple images
-        image_extensions = {'.jpg', '.jpeg', '.png', '.heic'}
+        # Check for multiple images (including videos that will be converted to still frames)
+        image_extensions = {'.jpg', '.jpeg', '.png', '.heic', '.mov', '.mp4'}
 
-        # All must be images
+        # All must be images/videos
         if all(ext in image_extensions for ext in extensions):
-            # Validate image files can be opened
+            # Validate image/video files can be opened
             await UploadManager._validate_image_files(files)
             return "multiple_images"
 
@@ -434,7 +590,7 @@ class UploadManager:
         if unsupported:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type: {unsupported[0]}. Allowed: .pdf, .jpg, .jpeg, .png, .heic"
+                detail=f"Unsupported file type: {unsupported[0]}. Allowed: .pdf, .jpg, .jpeg, .png, .heic, .mov, .mp4"
             )
 
         raise HTTPException(
@@ -445,7 +601,8 @@ class UploadManager:
     @staticmethod
     async def _validate_image_files(files: List[UploadFile]):
         """
-        Validates that all files are valid images.
+        Validates that all files are valid images or videos.
+        For video files (MOV/MP4), extracts first frame and validates it.
 
         Raises:
             HTTPException: If any image is invalid or corrupted
@@ -468,35 +625,63 @@ class UploadManager:
                 # Reset file pointer for later use
                 await file.seek(0)
 
-                # Check file size (max 20MB per image)
-                max_size = 20 * 1024 * 1024  # 20MB
+                # Check file size (max 50MB for videos, 20MB for images)
+                file_ext = Path(file.filename).suffix.lower()
+                is_video = file_ext in {'.mov', '.mp4'}
+                max_size = 50 * 1024 * 1024 if is_video else 20 * 1024 * 1024
+
                 if len(content) > max_size:
+                    file_type = "video" if is_video else "image"
+                    max_mb = 50 if is_video else 20
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Image {idx + 1} ('{file.filename}') exceeds 20MB limit"
+                        detail=f"{file_type.capitalize()} {idx + 1} ('{file.filename}') exceeds {max_mb}MB limit"
                     )
 
                 if len(content) == 0:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Image {idx + 1} ('{file.filename}') is empty"
+                        detail=f"File {idx + 1} ('{file.filename}') is empty"
                     )
 
-                # Validate image can be opened by Pillow
-                with tempfile.NamedTemporaryFile(delete=True) as tmp:
-                    tmp.write(content)
-                    tmp.flush()
+                # For videos: extract frame and validate it
+                if is_video:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_video:
+                        tmp_video.write(content)
+                        tmp_video.flush()
+                        video_path = Path(tmp_video.name)
 
-                    # Try to open and verify image
-                    with Image.open(tmp.name) as img:
-                        img.verify()  # Throws if corrupted
+                    try:
+                        # Extract first frame
+                        frame_path = extract_frame_from_video(video_path)
+
+                        # Validate extracted frame
+                        with Image.open(frame_path) as img:
+                            img.verify()
+
+                        # Clean up extracted frame
+                        frame_path.unlink(missing_ok=True)
+                        print(f"✅ [VIDEO] Video {idx + 1} ('{file.filename}') validated successfully")
+
+                    finally:
+                        # Clean up video file
+                        video_path.unlink(missing_ok=True)
+                else:
+                    # For images: validate with Pillow
+                    with tempfile.NamedTemporaryFile(delete=True) as tmp:
+                        tmp.write(content)
+                        tmp.flush()
+
+                        # Try to open and verify image
+                        with Image.open(tmp.name) as img:
+                            img.verify()  # Throws if corrupted
 
             except HTTPException:
                 raise  # Re-raise HTTP exceptions
             except Exception as e:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Image {idx + 1} ('{file.filename}') is corrupted or invalid: {str(e)}"
+                    detail=f"File {idx + 1} ('{file.filename}') is corrupted or invalid: {str(e)}"
                 )
 
     @staticmethod
@@ -571,27 +756,28 @@ class UploadManager:
                 return special_opinion.id
 
     @staticmethod
-    async def _enqueue_ocr_documents_nonblocking(doc_ids: List[int], email: Optional[str] = None):
+    async def _enqueue_ocr_documents_nonblocking(doc_ids: List[int], email: Optional[str] = None, email_option: str = "none"):
         """
         Asynchronicznie wstawia dokumenty do kolejki OCR bez blokowania.
 
         Args:
             doc_ids: List of document IDs to process
             email: Optional email to send when OCR completes
+            email_option: Email option type: "none", "pdf_only", or "pdf_with_ocr"
         """
         from app.background_tasks import enqueue_ocr_task
 
         if email:
-            print(f"📧 [UPLOAD_MANAGER] Passing email to OCR queue: {email}")
+            print(f"📧 [UPLOAD_MANAGER] Passing email to OCR queue: {email} (option: {email_option})")
 
         for doc_id in doc_ids:
             try:
                 with Session(engine) as session:
                     doc = session.get(Document, doc_id)
                     if doc and doc.ocr_status == "pending":
-                        await enqueue_ocr_task(doc_id, email=email)
+                        await enqueue_ocr_task(doc_id, email=email, email_option=email_option)
                         if email:
-                            print(f"📧 [UPLOAD_MANAGER] Enqueued OCR task for doc {doc_id} with email {email}")
+                            print(f"📧 [UPLOAD_MANAGER] Enqueued OCR task for doc {doc_id} with email {email} (option: {email_option})")
                         await asyncio.sleep(0)  # Oddaj kontrolę
             except Exception as e:
                 print(f"Błąd podczas dodawania dokumentu {doc_id} do kolejki OCR: {str(e)}")

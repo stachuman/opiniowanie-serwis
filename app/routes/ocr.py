@@ -4,9 +4,11 @@ Endpointy związane z OCR - uruchamianie, monitorowanie, zaawansowane viewery.
 """
 
 import asyncio
+import json
 import tempfile
 import os
-from fastapi import APIRouter, Request, HTTPException
+from typing import Optional
+from fastapi import APIRouter, Query, Request, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
@@ -90,6 +92,60 @@ async def document_run_ocr_merge(request: Request, doc_id: int):
     return RedirectResponse(f"{redirect_url}?ocr_merge_started=true", status_code=303)
 
 
+@router.post("/api/document/{doc_id}/run-ocr", name="api_run_ocr")
+async def api_run_ocr(doc_id: int):
+    """API endpoint to start/restart OCR — returns JSON (no redirect)."""
+    with Session(engine) as session:
+        doc = session.get(Document, doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
+        if doc.ocr_status == "running":
+            return {"success": False, "error": "OCR jest już w trakcie"}
+        doc.ocr_status = "pending"
+        doc.ocr_progress = 0.0
+        doc.ocr_progress_info = "Oczekuje w kolejce"
+        session.add(doc)
+        session.commit()
+
+    asyncio.create_task(enqueue_ocr_task(doc_id))
+    return {"success": True, "message": "OCR uruchomiony"}
+
+
+@router.post("/api/document/{doc_id}/run-ocr-merge", name="api_run_ocr_merge")
+async def api_run_ocr_merge(request: Request, doc_id: int):
+    """API endpoint to run OCR for selected pages only — returns JSON."""
+    from tasks.ocr.pipeline import parse_page_selection
+
+    form_data = await request.form()
+    pages_str = form_data.get("pages", "")
+
+    if not pages_str or not pages_str.strip():
+        return {"success": False, "error": "Nie podano numerów stron"}
+
+    try:
+        merge_pages = parse_page_selection(pages_str)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    with Session(engine) as session:
+        doc = session.get(Document, doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu")
+        if doc.ocr_status == "running":
+            return {"success": False, "error": "OCR jest już w trakcie"}
+        if doc.mime_type != "application/pdf":
+            return {"success": False, "error": "Merge OCR dostępny tylko dla PDF"}
+
+        doc.ocr_status = "pending"
+        doc.ocr_progress = 0.0
+        doc.ocr_progress_info = f"Merge OCR: strony {pages_str}"
+        session.add(doc)
+        session.commit()
+
+    asyncio.create_task(enqueue_ocr_task(doc_id, merge_pages=merge_pages))
+    return {"success": True, "message": f"OCR uruchomiony dla stron: {pages_str}"}
+
+
 @router.get("/api/document/{doc_id}/ocr-progress", name="document_ocr_progress")
 def document_ocr_progress(doc_id: int):
     """Zwraca informacje o postępie OCR w formacie JSON."""
@@ -109,6 +165,58 @@ def document_ocr_progress(doc_id: int):
         }
 
         return progress_data
+
+
+@router.get("/api/document/{doc_id}/ocr-layout", name="document_ocr_layout")
+def document_ocr_layout(doc_id: int, page: Optional[int] = Query(None, ge=1)):
+    """Returns layout data (bounding boxes + text) for OCR results.
+
+    Query params:
+        page: Optional 1-based page number. If omitted, returns all pages.
+
+    Returns JSON with layout blocks containing normalized bbox coordinates (0-1).
+    If no layout data exists (QWEN fallback or old OCR), returns has_layout=false.
+    """
+    with Session(engine) as session:
+        # Find the OCR txt document for this doc_id
+        ocr_query = select(Document).where(
+            Document.ocr_parent_id == doc_id,
+            Document.doc_type == "ocr_txt"
+        ).order_by(Document.upload_time.desc())
+        ocr_doc = session.exec(ocr_query).first()
+
+        if not ocr_doc:
+            return {"success": True, "has_layout": False}
+
+        # Derive layout JSON path from stored_filename
+        txt_filename = ocr_doc.stored_filename
+        layout_filename = txt_filename.rsplit('.', 1)[0] + '.layout.json'
+        layout_path = FILES_DIR / layout_filename
+
+        if not layout_path.exists():
+            return {"success": True, "has_layout": False}
+
+        try:
+            layout_json = json.loads(layout_path.read_text(encoding="utf-8"))
+            pages_data = layout_json.get("pages", {})
+        except Exception as e:
+            return {"success": False, "error": f"Failed to read layout data: {e}"}
+
+        if page is not None:
+            page_key = str(page)
+            blocks = pages_data.get(page_key, [])
+            return {
+                "success": True,
+                "has_layout": len(blocks) > 0,
+                "page": page,
+                "blocks": blocks
+            }
+        else:
+            return {
+                "success": True,
+                "has_layout": len(pages_data) > 0,
+                "pages": pages_data
+            }
 
 
 @router.get("/document/{doc_id}/ocr-status", name="document_ocr_status")
@@ -273,7 +381,16 @@ async def document_ocr_selection(request: Request, doc_id: int):
 
                     # Weź pierwszy obraz strony
                     image = images[0]
-                    
+
+                    # Apply ML orientation correction (ignore EXIF)
+                    try:
+                        from tasks.ocr.orientation_detector import detect_and_correct_orientation
+                        image, _, _ = detect_and_correct_orientation(image)
+                        print(f"✅ [OCR_SELECTION] ML orientation correction applied to page {page}")
+                    except Exception as e:
+                        logger.warning(f"ML orientation correction failed for page {page}: {e}")
+                        # Continue with original image
+
                     # NOWE: Obsłuż rotację PDF przed crop
                     if rotation != 0:
                         print(f"🔧 [OCR_SELECTION] Obracam stronę PDF o {rotation}° przed crop")

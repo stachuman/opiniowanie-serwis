@@ -361,6 +361,14 @@ def document_detail(request: Request, doc_id: int):
     # Deleguj całą logikę do managera
     result = document_manager.get_document_detail(doc_id)
 
+    # PDF documents → redirect to OCR viewer (the main work surface)
+    if (result.document.mime_type == 'application/pdf'
+            and not request.query_params.get('no_redirect')):
+        return RedirectResponse(
+            request.url_for("document_pdf_viewer", doc_id=doc_id),
+            status_code=302
+        )
+
     # Zbuduj nawigację
     navigation = build_document_navigation(request, result.document, None, result.parent_opinion)
 

@@ -610,27 +610,15 @@ def build_advanced_viewer_navigation(request: Request, document: Document,
 
     # Tytuły dla różnych typów viewerów
     viewer_configs = {
-        'pdf_viewer': ('Zaawansowany podgląd PDF', 'search'),
-        'image_viewer': ('Zaawansowany podgląd obrazu', 'search')
+        'pdf_viewer': ('OCR', 'search'),
+        'image_viewer': ('OCR', 'search')
     }
 
-    title, icon = viewer_configs.get(viewer_type, ('Zaawansowany podgląd', 'search'))
+    title, icon = viewer_configs.get(viewer_type, ('OCR', 'search'))
     breadcrumbs.add_current(title, icon)
-
-    # Page Actions - powrót do szczegółów
-    actions = (PageActionsBuilder(request)
-               .add_secondary("Powrót do dokumentu",
-                              str(request.url_for('document_detail', doc_id=document.id)),
-                              "arrow-left")
-               .add_secondary("Pobierz",
-                              str(request.url_for('document_download', doc_id=document.id)),
-                              "download")
-               .build())
 
     return {
         'breadcrumbs': breadcrumbs.build(),
-        'page_title': f"{title} - {document.original_filename}",
-        'page_actions': actions,
         'context_info': []
     }
 

@@ -2,58 +2,68 @@
 
 {# Ustawienia dla base.html #}
 {% set page_type = 'pdf_viewer' %}
-{% set page_title = 'Podgląd PDF z zaznaczaniem' %}
-{% set page_actions = [
-  {
-    'name': 'Powrót do dokumentu',
-    'url': url_for('document_detail', doc_id=doc.id),
-    'icon': 'arrow-left',
-    'class': 'btn-outline-secondary'
-  },
-  {
-    'name': 'Pobierz PDF',
-    'url': url_for('document_download', doc_id=doc.id),
-    'icon': 'download',
-    'class': 'btn-outline-primary'
-  }
-] %}
+{% set main_container_class = 'container-fluid px-2 py-1' %}
 
 {% block content %}
 <div id="ocrViewerContainer" class="container-fluid">
-  <!-- OCR Status Banner (mobile-friendly) -->
-  {% if doc.ocr_status == 'running' or doc.ocr_status == 'pending' %}
-  <div class="alert alert-info d-flex align-items-center mb-3" role="alert" id="ocrStatusBanner">
-    <div class="spinner-border spinner-border-sm me-2" role="status">
-      <span class="visually-hidden">Przetwarzanie...</span>
+  <!-- OCR Progress Banner -->
+  <div id="ocrProgressBanner" class="mb-1 {% if doc.ocr_status != 'running' and doc.ocr_status != 'pending' %}d-none{% endif %}">
+    <div class="d-flex align-items-center gap-2">
+      <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+      <small class="text-muted"><strong>OCR</strong> <span id="ocrProgressInfo">{{ doc.ocr_progress_info or '...' }}</span></small>
+      <div class="progress flex-grow-1" style="height: 14px;">
+        <div id="ocrProgressBar"
+             class="progress-bar progress-bar-striped progress-bar-animated"
+             role="progressbar"
+             style="width: {{ (doc.ocr_progress or 0) * 100 }}%">
+          <small id="ocrProgressText" style="font-size: 0.7rem;">{{ ((doc.ocr_progress or 0) * 100)|round }}%</small>
+        </div>
+      </div>
     </div>
-    <div class="flex-grow-1">
-      <strong>OCR w toku</strong> - Rozpoznawanie tekstu w tle...
-    </div>
-    <button type="button" class="btn-close ms-2" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
-  {% endif %}
 
-  <div class="row">
+  <div class="split-container" id="splitContainer">
     <!-- Kolumna z podglądem PDF -->
-    <div class="col-12 col-lg-8 mb-3 mb-lg-0">
+    <div class="split-pane split-left" id="splitLeft">
       <div class="card">
         <div class="card-header">
           <!-- Mobile-friendly navigation: stacked on small screens -->
-          <div class="d-flex flex-column flex-sm-row justify-content-between align-items-stretch align-items-sm-center gap-2">
-            <div class="btn-group" role="group">
-              <button id="prevPage" class="btn btn-sm btn-outline-secondary">
-                <i class="bi bi-arrow-left"></i><span class="d-none d-sm-inline"> Poprzednia</span>
-              </button>
-              <span id="pageInfo" class="btn btn-sm btn-outline-secondary disabled"></span>
-              <button id="nextPage" class="btn btn-sm btn-outline-secondary">
-                <span class="d-none d-sm-inline">Następna </span><i class="bi bi-arrow-right"></i>
-              </button>
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-1">
+            <div class="d-flex align-items-center gap-1">
+              <div class="btn-group" role="group">
+                <button id="prevPage" class="btn btn-sm btn-outline-secondary">
+                  <i class="bi bi-arrow-left"></i>
+                </button>
+                <span id="pageInfo" class="btn btn-sm btn-outline-secondary disabled"></span>
+                <button id="nextPage" class="btn btn-sm btn-outline-secondary">
+                  <i class="bi bi-arrow-right"></i>
+                </button>
+              </div>
+              <div class="input-group input-group-sm" style="max-width: 140px;">
+                <input type="number" id="pageJumpInput" class="form-control" placeholder="Nr" min="1">
+                <button id="pageJumpBtn" class="btn btn-outline-primary" type="button">
+                  <i class="bi bi-arrow-right-circle"></i>
+                </button>
+              </div>
             </div>
-
-            <div class="input-group" style="max-width: 200px;">
-              <input type="number" id="pageJumpInput" class="form-control form-control-sm" placeholder="Nr strony" min="1">
-              <button id="pageJumpBtn" class="btn btn-sm btn-outline-primary" type="button">
-                <i class="bi bi-arrow-right-circle"></i><span class="d-none d-sm-inline"> Idź</span>
+            <div class="d-flex align-items-center gap-1">
+              {% if doc.parent_id %}
+              <a href="{{ url_for('opinion_detail', doc_id=doc.parent_id) }}" class="btn btn-sm btn-outline-secondary" title="Wróć do opinii">
+                <i class="bi bi-arrow-left"></i>
+              </a>
+              {% else %}
+              <a href="{{ url_for('list_documents') }}" class="btn btn-sm btn-outline-secondary" title="Lista dokumentów">
+                <i class="bi bi-arrow-left"></i>
+              </a>
+              {% endif %}
+              <a href="{{ url_for('document_detail', doc_id=doc.id) }}?no_redirect=1" class="btn btn-sm btn-outline-secondary" title="Szczegóły dokumentu">
+                <i class="bi bi-file-earmark-text"></i>
+              </a>
+              <a href="{{ url_for('document_download', doc_id=doc.id) }}" class="btn btn-sm btn-outline-primary" title="Pobierz PDF">
+                <i class="bi bi-download"></i>
+              </a>
+              <button id="fragmentOcrBtn" class="btn btn-sm btn-outline-warning" title="Zaznacz fragment do rozpoznania">
+                <i class="bi bi-crop"></i> Rozpoznaj fragment
               </button>
             </div>
           </div>
@@ -61,8 +71,9 @@
         </div>
         <div class="card-body p-0 position-relative">
           <!-- OCR Viewer Container - responsive height -->
-            <div id="pdfContainer" class="pdf-container-mobile" style="position: relative; overflow: hidden;">
-              <canvas id="pdfCanvas" style="width: 100%; height: 100%;"></canvas>
+            <div id="pdfContainer" class="pdf-container-mobile" style="position: relative; overflow: auto;">
+              <canvas id="pdfCanvas" style="display: block; max-width: 100%;"></canvas>
+              <div id="textOverlayLayer" style="position: absolute; top: 0; left: 0; overflow: hidden; z-index: 2; pointer-events: none;"></div>
               <div id="selectionOverlay" class="ocr-selection-overlay" style="display: none;"></div>
             </div>
 
@@ -81,31 +92,80 @@
       </div>
     </div>
 
+    <!-- Draggable divider -->
+    <div class="split-divider d-none d-lg-flex" id="splitDivider">
+      <div class="split-divider-line"></div>
+    </div>
+
     <!-- Kolumna z tekstem OCR -->
-    <div class="col-12 col-lg-4">
+    <div class="split-pane split-right" id="splitRight">
       <div class="card">
         <div class="card-header">
-          <div class="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
-            <h5 class="mb-0">Rozpoznany tekst</h5>
-            {% if doc.ocr_status == 'running' or doc.ocr_status == 'pending' %}
-            <span class="badge bg-info">
-              <i class="bi bi-hourglass-split"></i> OCR w toku
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-1">
+            <span class="fw-semibold small">
+              Tekst
+              <span id="ocrStatusBadge" class="ms-1">
+                {% if doc.ocr_status == 'running' or doc.ocr_status == 'pending' %}
+                <span class="badge bg-info"><i class="bi bi-hourglass-split"></i></span>
+                {% elif doc.ocr_status == 'done' %}
+                <span class="badge bg-success"><i class="bi bi-check-circle"></i></span>
+                {% elif doc.ocr_status == 'fail' %}
+                <span class="badge bg-danger"><i class="bi bi-x-circle"></i></span>
+                {% endif %}
+              </span>
             </span>
-            {% elif doc.ocr_status == 'done' %}
-            <span class="badge bg-success">
-              <i class="bi bi-check-circle"></i> OCR zakończony
-            </span>
-            {% endif %}
+            <div class="d-flex align-items-center gap-1" id="ocrActions">
+              <button id="runOcrPageBtn" class="btn btn-sm btn-outline-success" title="OCR bieżącej strony">
+                <i class="bi bi-file-play"></i>
+              </button>
+              <button id="runOcrAllBtn" class="btn btn-sm btn-outline-primary" title="{{ 'Uruchom OCR' if doc.ocr_status == 'none' else 'Powtórz OCR' }}">
+                <i class="bi bi-{{ 'play-fill' if doc.ocr_status == 'none' else 'arrow-clockwise' }}"></i>
+              </button>
+            </div>
           </div>
         </div>
-        <div class="card-body">
+        <div class="card-body p-2">
           <!-- Text Editor Container -->
           <div id="textEditorContainer">
-            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center mb-2 gap-2">
-              <h6 class="mb-0">Pełny tekst strony</h6>
-              <button id="copyFullBtn" class="btn btn-sm btn-outline-secondary copy-text-btn w-100 w-sm-auto" data-copy-target="#textDisplay">
-                <i class="bi bi-clipboard"></i> Kopiuj całość
-              </button>
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <small class="text-muted">Str. <span id="currentPageLabel">1</span></small>
+              <div class="d-flex gap-1">
+                <div class="btn-group">
+                  <button id="viewTextBtn" class="btn btn-sm btn-outline-secondary active" title="Widok tekstowy">
+                    <i class="bi bi-file-text"></i>
+                  </button>
+                  <button id="viewHtmlBtn" class="btn btn-sm btn-outline-secondary" title="Widok HTML (tabele)">
+                    <i class="bi bi-table"></i>
+                  </button>
+                </div>
+                <button id="searchToggleBtn" class="btn btn-sm btn-outline-secondary" title="Szukaj w tekście (Ctrl+F)">
+                  <i class="bi bi-search"></i>
+                </button>
+                <div class="btn-group">
+                  <button id="copyPageBtn" class="btn btn-sm btn-outline-primary" title="Kopiuj tekst bieżącej strony">
+                    <i class="bi bi-clipboard"></i>
+                  </button>
+                  <button id="copyFullBtn" class="btn btn-sm btn-outline-secondary" title="Kopiuj tekst wszystkich stron">
+                    <i class="bi bi-clipboard-check"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <!-- Search bar (hidden by default) -->
+            <div id="searchBar" class="d-none mb-1">
+              <div class="input-group input-group-sm">
+                <input type="text" id="searchInput" class="form-control" placeholder="Szukaj w dokumencie...">
+                <span id="searchCount" class="input-group-text search-count" style="min-width: 52px; justify-content: center;">0/0</span>
+                <button id="searchPrevBtn" class="btn btn-outline-secondary" title="Poprzedni" disabled>
+                  <i class="bi bi-chevron-up"></i>
+                </button>
+                <button id="searchNextBtn" class="btn btn-outline-secondary" title="Następny" disabled>
+                  <i class="bi bi-chevron-down"></i>
+                </button>
+                <button id="searchCloseBtn" class="btn btn-outline-secondary" title="Zamknij">
+                  <i class="bi bi-x-lg"></i>
+                </button>
+              </div>
             </div>
 
             <!-- Text Display Area - responsive height -->
@@ -120,7 +180,7 @@
 </div>
 
 <!-- Modal dla rozpoznanego tekstu fragmentu -->
-<div class="modal fade" id="fragmentTextModal" tabindex="-1" aria-labelledby="fragmentTextModalLabel" aria-hidden="true">
+<div class="modal fade" id="fragmentTextModal" tabindex="-1" aria-labelledby="fragmentTextModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
@@ -141,7 +201,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-primary" onclick="ocrViewer.addToFullText(document.getElementById('fragmentTextContent').textContent)">
+        <button type="button" class="btn btn-primary" data-action="add-fragment-to-text">
           <i class="bi bi-plus-circle"></i> Dodaj do pełnego tekstu
         </button>
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Zamknij</button>
@@ -153,48 +213,242 @@
 
 {% block extra_css %}
 <style>
-/* Mobile-responsive PDF container */
-.pdf-container-mobile {
-  height: 600px; /* Default for desktop */
+/* Prevent text selection from leaking outside text panel */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+#textDisplay {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
-/* Adjust heights for mobile devices */
+/* Hide navbar and breadcrumb — maximize working area */
+nav.navbar, .breadcrumb-container {
+  display: none !important;
+}
+
+/* Fill entire viewport */
+main {
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 4px !important;
+}
+#ocrViewerContainer {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+/* Text overlay layer for selectable OCR text */
+#textOverlayLayer {
+  pointer-events: none;
+  user-select: none;
+}
+
+#textOverlayLayer span {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  line-height: 1;
+  overflow: hidden;
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#textOverlayLayer span::selection {
+  background: rgba(0, 123, 255, 0.3);
+}
+
+#textOverlayLayer span::-moz-selection {
+  background: rgba(0, 123, 255, 0.3);
+}
+
+/* Search highlighting */
+#textDisplay mark.search-highlight {
+  background-color: #fff3cd;
+  padding: 0;
+  border-radius: 2px;
+}
+#textDisplay mark.search-highlight.active {
+  background-color: #fd7e14;
+  color: #fff;
+}
+.search-count {
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+/* HTML view mode for text display */
+#textDisplay.html-view {
+  white-space: normal;
+}
+
+#textDisplay.html-view table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+}
+
+#textDisplay.html-view th,
+#textDisplay.html-view td {
+  border: 1px solid #dee2e6;
+  padding: 0.35rem 0.5rem;
+  vertical-align: top;
+}
+
+#textDisplay.html-view thead {
+  background-color: #e9ecef;
+  font-weight: 600;
+}
+
+#textDisplay.html-view tr:nth-child(even) {
+  background-color: rgba(0,0,0,.02);
+}
+
+/* === Split pane layout === */
+.split-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+.split-pane {
+  min-width: 0; /* allow flex shrink below content size */
+  min-height: 0;
+}
+
+/* Draggable divider */
+.split-divider {
+  width: 12px;
+  cursor: col-resize;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+  z-index: 10;
+}
+
+.split-divider-line {
+  width: 4px;
+  height: 48px;
+  border-radius: 2px;
+  background: #ced4da;
+  transition: background 0.15s, height 0.15s;
+}
+
+.split-divider:hover .split-divider-line,
+.split-divider.active .split-divider-line {
+  background: #0d6efd;
+  height: 64px;
+}
+
+/* Desktop: side-by-side with resizable split */
+@media (min-width: 992px) {
+  .split-container {
+    flex-direction: row;
+    gap: 0;
+  }
+
+  .split-left {
+    flex: 0 0 50%;
+    max-width: 85%;
+    min-width: 300px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .split-left > .card {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .split-left > .card > .card-body {
+    flex: 1 1 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .pdf-container-mobile {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+
+  .split-right {
+    flex: 1 1 0;
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .text-display-mobile {
+    max-height: none !important;
+    flex: 1 1 0;
+  }
+
+  .split-right > .card {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .split-right > .card > .card-body {
+    flex: 1 1 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .split-right #textEditorContainer {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+}
+
+/* Mobile: stacked */
+.pdf-container-mobile {
+  height: 600px;
+}
+
 @media (max-width: 991.98px) {
   .pdf-container-mobile {
-    height: 50vh; /* 50% of viewport height on mobile */
+    height: 50vh;
     min-height: 400px;
   }
 
   .text-display-mobile {
-    max-height: 40vh !important; /* Limit text display on mobile */
+    max-height: 40vh !important;
   }
 }
 
-/* Very small screens (phones in portrait) */
 @media (max-width: 575.98px) {
   .pdf-container-mobile {
     height: 60vh;
     min-height: 300px;
   }
 
-  /* Make buttons full-width on very small screens */
   .btn-group {
     width: 100%;
   }
 
   .btn-group .btn {
     flex: 1;
-  }
-}
-
-/* Tablet landscape and desktop */
-@media (min-width: 992px) {
-  .pdf-container-mobile {
-    height: 800px;
-  }
-
-  .text-display-mobile {
-    max-height: 500px !important;
   }
 }
 </style>
@@ -234,11 +488,129 @@ document.addEventListener('DOMContentLoaded', function() {
   window.textEditor = textEditor;
   window.pdfViewerManager = pdfViewerManager; // NOWE
 
-  // Bezpośrednie połączenie komponentów (istniejący kod)
-  window.updateTextFromOcr = function(text) {
-    if (window.textEditor) {
-      window.textEditor.setText(text);
+  // Event listener for "add fragment to text" button (replaces inline onclick)
+  document.querySelector('[data-action="add-fragment-to-text"]')?.addEventListener('click', function() {
+    const fragmentText = document.getElementById('fragmentTextContent')?.textContent;
+    if (fragmentText && window.ocrViewer) {
+      window.ocrViewer.addToFullText(fragmentText);
     }
+  });
+
+  // === Fragment OCR toggle button ===
+  document.getElementById('fragmentOcrBtn')?.addEventListener('click', function() {
+    if (window.ocrViewer) {
+      window.ocrViewer.setSelectionMode(!window.ocrViewer.state.selectionMode);
+    }
+  });
+
+  // === Text/HTML view mode ===
+  const SAFE_TAGS = new Set(['TABLE','THEAD','TBODY','TFOOT','TR','TH','TD','BR','P','B','STRONG','I','EM','U','UL','OL','LI','H1','H2','H3','H4','H5','H6','SUP','SUB','CAPTION','COLGROUP','COL']);
+
+  let viewMode = 'text'; // 'text' or 'html'
+  let rawPageText = '';   // raw OCR text for current page
+
+  function stripHtmlTags(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || '';
+  }
+
+  function containsHtml(text) {
+    return /<(table|tr|td|th)\b/i.test(text);
+  }
+
+  function sanitizeHtml(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    function walk(node) {
+      const children = Array.from(node.childNodes);
+      for (const child of children) {
+        if (child.nodeType === 1) { // element
+          if (!SAFE_TAGS.has(child.tagName)) {
+            // Replace disallowed tag with its text content
+            child.replaceWith(document.createTextNode(child.textContent));
+          } else {
+            // Remove all attributes except colspan/rowspan
+            for (const attr of Array.from(child.attributes)) {
+              if (attr.name !== 'colspan' && attr.name !== 'rowspan') {
+                child.removeAttribute(attr.name);
+              }
+            }
+            walk(child);
+          }
+        }
+      }
+    }
+    walk(tmp);
+    return tmp.innerHTML;
+  }
+
+  function extractTextFromQwenJson(text) {
+    // Fix for already-stored QWEN JSON output: extract text_content fields
+    const trimmed = text.trim().replace(/^```json\s*\n?/, '').replace(/\n?\s*```$/, '');
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const parts = [];
+        for (const val of Object.values(parsed)) {
+          if (val && typeof val === 'object' && val.text_content) {
+            parts.push(val.text_content);
+          }
+        }
+        if (parts.length > 0) return parts.join('\n');
+      }
+    } catch (e) { /* not JSON */ }
+    return null;
+  }
+
+  function renderText(text) {
+    // Auto-fix QWEN JSON stored as raw text
+    if (text && /^\s*(`{3}json\s*)?\s*\{/.test(text) && /"text_content"/.test(text)) {
+      const extracted = extractTextFromQwenJson(text);
+      if (extracted) {
+        text = extracted;
+      }
+    }
+
+    rawPageText = text;
+    const display = document.getElementById('textDisplay');
+    if (!display) return;
+
+    if (viewMode === 'text') {
+      display.classList.remove('html-view');
+      display.style.whiteSpace = 'pre-wrap';
+      display.textContent = containsHtml(text) ? stripHtmlTags(text) : text;
+    } else {
+      display.classList.add('html-view');
+      display.style.whiteSpace = 'normal';
+      if (containsHtml(text)) {
+        // Split into HTML parts and plain text parts, render appropriately
+        display.innerHTML = sanitizeHtml(text);
+      } else {
+        // No HTML in text, just show as pre-wrapped text node
+        display.textContent = text;
+        display.style.whiteSpace = 'pre-wrap';
+      }
+    }
+  }
+
+  document.getElementById('viewTextBtn')?.addEventListener('click', function() {
+    viewMode = 'text';
+    this.classList.add('active');
+    document.getElementById('viewHtmlBtn')?.classList.remove('active');
+    renderText(rawPageText);
+  });
+
+  document.getElementById('viewHtmlBtn')?.addEventListener('click', function() {
+    viewMode = 'html';
+    this.classList.add('active');
+    document.getElementById('viewTextBtn')?.classList.remove('active');
+    renderText(rawPageText);
+  });
+
+  // Override text update to go through renderText
+  window.updateTextFromOcr = function(text) {
+    renderText(text);
   };
 
   window.updateOcrCache = function(text) {
@@ -248,83 +620,491 @@ document.addEventListener('DOMContentLoaded', function() {
   };
 
   // Monitoruj zmiany w OCR Viewer i aktualizuj Text Editor
-  const originalUpdateDisplayText = ocrViewer.updateDisplayText;
   ocrViewer.updateDisplayText = function(text) {
-    originalUpdateDisplayText.call(this, text);
-    window.updateTextFromOcr(text);
+    // Store raw text in ocr-viewer state (not in DOM — renderText handles display)
+    this.textState.originalText = text;
+    // Render via our view mode handler (text vs html)
+    renderText(text);
   };
 
   window.saveCurrentText = function() {
     return textEditor.saveChanges();
   };
 
-  // Auto-refresh OCR status if OCR is running
-  {% if doc.ocr_status == 'running' or doc.ocr_status == 'pending' %}
-  let ocrStatusCheckInterval = setInterval(async function() {
-    try {
-      const response = await fetch('/api/document/{{ doc.id }}/status');
-      const data = await response.json();
-
-      if (data.ocr_status === 'done') {
-        clearInterval(ocrStatusCheckInterval);
-
-        // Update banner
-        const banner = document.getElementById('ocrStatusBanner');
-        if (banner) {
-          banner.className = 'alert alert-success d-flex align-items-center mb-3';
-          banner.innerHTML = `
-            <i class="bi bi-check-circle-fill me-2"></i>
-            <div class="flex-grow-1">
-              <strong>OCR zakończony!</strong> Odśwież stronę aby zobaczyć wyniki.
-            </div>
-            <button type="button" class="btn btn-sm btn-primary ms-2" onclick="location.reload()">
-              <i class="bi bi-arrow-clockwise"></i> Odśwież
-            </button>
-          `;
-        }
-
-        // Show notification
-        if (window.alertManager) {
-          window.alertManager.success('OCR zakończony! Kliknij "Odśwież" aby zobaczyć wyniki.', {
-            duration: 0 // Don't auto-dismiss
-          });
-        }
-      } else if (data.ocr_status === 'fail') {
-        clearInterval(ocrStatusCheckInterval);
-
-        // Update banner to error state
-        const banner = document.getElementById('ocrStatusBanner');
-        if (banner) {
-          banner.className = 'alert alert-danger d-flex align-items-center mb-3';
-          banner.innerHTML = `
-            <i class="bi bi-exclamation-triangle-fill me-2"></i>
-            <div class="flex-grow-1">
-              <strong>OCR nie powiódł się</strong> - Wystąpił błąd podczas rozpoznawania tekstu.
-            </div>
-            <button type="button" class="btn-close ms-2" data-bs-dismiss="alert"></button>
-          `;
-        }
-      }
-    } catch (error) {
-      console.error('Error checking OCR status:', error);
+  // Copy page text button (always copies raw OCR text)
+  document.getElementById('copyPageBtn')?.addEventListener('click', async function() {
+    const text = rawPageText || '';
+    if (!text.trim()) {
+      if (window.alertManager) window.alertManager.warning('Brak tekstu do skopiowania');
+      return;
     }
-  }, 5000); // Check every 5 seconds
-  {% endif %}
-});
+    try {
+      await window.clipboardManager.copyTextToClipboard(text);
+      if (window.alertManager) window.alertManager.success('Tekst strony skopiowany');
+    } catch (e) {
+      if (window.alertManager) window.alertManager.error('Nie udało się skopiować');
+    }
+  });
 
-// Obsługa przycisków uruchamiania OCR (jeśli są)
-{% if doc.ocr_status != 'running' %}
-document.addEventListener('DOMContentLoaded', function() {
-  const runOcrForms = document.querySelectorAll('form[action*="run-ocr"]');
-  runOcrForms.forEach(form => {
-    form.addEventListener('submit', function() {
-      // Pokaż komunikat o rozpoczęciu OCR
-      window.alertManager.info('Rozpoczęto proces OCR. Rozpoznawanie tekstu w toku...', {
-        duration: 5000
-      });
-    });
+  // Copy full text button (all pages)
+  document.getElementById('copyFullBtn')?.addEventListener('click', async function() {
+    const fullText = window.ocrViewer?.state?.fullOcrText || '';
+    if (!fullText.trim()) {
+      if (window.alertManager) window.alertManager.warning('Brak tekstu do skopiowania');
+      return;
+    }
+    try {
+      await window.clipboardManager.copyTextToClipboard(fullText);
+      if (window.alertManager) window.alertManager.success('Pełny tekst skopiowany');
+    } catch (e) {
+      if (window.alertManager) window.alertManager.error('Nie udało się skopiować');
+    }
+  });
+
+  // Update currentPageLabel when page changes
+  const origUpdatePageInfo = ocrViewer.updatePageInfo.bind(ocrViewer);
+  ocrViewer.updatePageInfo = function() {
+    origUpdatePageInfo();
+    const label = document.getElementById('currentPageLabel');
+    if (label) label.textContent = this.state.currentPage;
+  };
+
+  // === OCR Progress Monitoring ===
+  let ocrMonitorActive = {{ 'true' if doc.ocr_status in ['running', 'pending'] else 'false' }};
+
+  function startOcrMonitoring() {
+    if (ocrMonitorActive) return;
+    ocrMonitorActive = true;
+    document.getElementById('ocrProgressBanner')?.classList.remove('d-none');
+    pollOcrProgress();
+  }
+
+  async function pollOcrProgress() {
+    if (!ocrMonitorActive) return;
+    try {
+      const data = await window.apiClient.getOcrProgress({{ doc.id }});
+      updateOcrProgressUI(data);
+
+      if (data.status === 'running' || data.status === 'pending') {
+        setTimeout(pollOcrProgress, 2000);
+      } else {
+        ocrMonitorActive = false;
+      }
+    } catch (e) {
+      console.error('OCR progress error:', e);
+      setTimeout(pollOcrProgress, 5000);
+    }
+  }
+
+  function updateOcrProgressUI(data) {
+    const banner = document.getElementById('ocrProgressBanner');
+    const bar = document.getElementById('ocrProgressBar');
+    const barText = document.getElementById('ocrProgressText');
+    const infoEl = document.getElementById('ocrProgressInfo');
+    const badge = document.getElementById('ocrStatusBadge');
+
+    if (data.status === 'running' || data.status === 'pending') {
+      banner?.classList.remove('d-none');
+      const pct = Math.round((data.progress || 0) * 100);
+      if (bar) bar.style.width = pct + '%';
+      if (barText) barText.textContent = pct + '%';
+      let info = data.info || 'Przetwarzanie...';
+      if (data.current_page && data.total_pages) {
+        info += ` (${data.current_page}/${data.total_pages})`;
+      }
+      if (infoEl) infoEl.textContent = info;
+      if (badge) badge.innerHTML = '<span class="badge bg-info"><i class="bi bi-hourglass-split"></i></span>';
+    } else if (data.status === 'done') {
+      banner?.classList.add('d-none');
+      if (badge) badge.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle"></i></span>';
+      // Reload OCR text
+      if (window.ocrViewer) {
+        window.ocrViewer.state.fullOcrText = null; // force re-fetch
+        window.ocrViewer.loadPageOcr(window.ocrViewer.state.currentPage);
+        // Also refresh text overlay
+        window.ocrViewer.state.layoutCache = {};
+        window.ocrViewer.renderTextOverlay(window.ocrViewer.state.currentPage);
+      }
+      if (window.alertManager) window.alertManager.success('OCR zakończony!');
+    } else if (data.status === 'fail') {
+      banner?.classList.add('d-none');
+      if (badge) badge.innerHTML = '<span class="badge bg-danger"><i class="bi bi-x-circle"></i></span>';
+      if (window.alertManager) window.alertManager.error('OCR nie powiódł się');
+    }
+  }
+
+  // Start monitoring if already running
+  if (ocrMonitorActive) pollOcrProgress();
+
+  // === OCR Action Buttons ===
+
+  // Run OCR for entire document
+  document.getElementById('runOcrAllBtn')?.addEventListener('click', async function() {
+    this.disabled = true;
+    try {
+      const result = await window.apiClient.runOcr({{ doc.id }});
+      if (result.success) {
+        if (window.alertManager) window.alertManager.info('OCR uruchomiony...');
+        startOcrMonitoring();
+      } else {
+        if (window.alertManager) window.alertManager.warning(result.error || 'Nie udało się uruchomić OCR');
+      }
+    } catch (e) {
+      if (window.alertManager) window.alertManager.error('Błąd: ' + e.message);
+    }
+    this.disabled = false;
+  });
+
+  // Run OCR for current page only
+  document.getElementById('runOcrPageBtn')?.addEventListener('click', async function() {
+    const page = window.ocrViewer?.state?.currentPage || 1;
+    this.disabled = true;
+    try {
+      const result = await window.apiClient.runOcrMerge({{ doc.id }}, String(page));
+      if (result.success) {
+        if (window.alertManager) window.alertManager.info(`OCR strony ${page} uruchomiony...`);
+        startOcrMonitoring();
+      } else {
+        if (window.alertManager) window.alertManager.warning(result.error || 'Nie udało się uruchomić OCR');
+      }
+    } catch (e) {
+      if (window.alertManager) window.alertManager.error('Błąd: ' + e.message);
+    }
+    this.disabled = false;
   });
 });
-{% endif %}
+
+// === Resizable split divider ===
+(function() {
+  const divider = document.getElementById('splitDivider');
+  const left = document.getElementById('splitLeft');
+  const container = document.getElementById('splitContainer');
+  if (!divider || !left || !container) return;
+
+  let dragging = false;
+
+  divider.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    dragging = true;
+    divider.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    const rect = container.getBoundingClientRect();
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    const clamped = Math.min(85, Math.max(25, pct));
+    left.style.flex = '0 0 ' + clamped + '%';
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove('active');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    // Re-render text overlay after resize
+    if (window.ocrViewer) {
+      window.ocrViewer.renderTextOverlay(window.ocrViewer.state.currentPage);
+    }
+  });
+
+  // Touch support
+  divider.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    dragging = true;
+    divider.classList.add('active');
+  }, { passive: false });
+
+  document.addEventListener('touchmove', function(e) {
+    if (!dragging) return;
+    const touch = e.touches[0];
+    const rect = container.getBoundingClientRect();
+    const pct = ((touch.clientX - rect.left) / rect.width) * 100;
+    const clamped = Math.min(85, Math.max(25, pct));
+    left.style.flex = '0 0 ' + clamped + '%';
+  }, { passive: true });
+
+  document.addEventListener('touchend', function() {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove('active');
+    if (window.ocrViewer) {
+      window.ocrViewer.renderTextOverlay(window.ocrViewer.state.currentPage);
+    }
+  });
+})();
+
+// === Synchronized scroll between PDF and text panels ===
+(function() {
+  const pdfPane = document.getElementById('pdfContainer');
+  const textPane = document.getElementById('textDisplay');
+  if (!pdfPane || !textPane) return;
+
+  let syncing = false;
+
+  function syncScroll(source, target) {
+    if (syncing) return;
+    const maxS = source.scrollHeight - source.clientHeight;
+    const maxT = target.scrollHeight - target.clientHeight;
+    if (maxS <= 0 || maxT <= 0) return;
+    syncing = true;
+    target.scrollTop = (source.scrollTop / maxS) * maxT;
+    // Release lock asynchronously to avoid feedback loop
+    requestAnimationFrame(() => { syncing = false; });
+  }
+
+  pdfPane.addEventListener('scroll', () => syncScroll(pdfPane, textPane), { passive: true });
+  textPane.addEventListener('scroll', () => syncScroll(textPane, pdfPane), { passive: true });
+})();
+
+// === Document-wide OCR-aware search ===
+(function() {
+  const searchToggleBtn = document.getElementById('searchToggleBtn');
+  const searchBar = document.getElementById('searchBar');
+  const searchInput = document.getElementById('searchInput');
+  const searchCount = document.getElementById('searchCount');
+  const searchPrevBtn = document.getElementById('searchPrevBtn');
+  const searchNextBtn = document.getElementById('searchNextBtn');
+  const searchCloseBtn = document.getElementById('searchCloseBtn');
+  const textDisplay = document.getElementById('textDisplay');
+
+  if (!searchToggleBtn || !searchBar || !searchInput) return;
+
+  let matches = [];      // { page, origStart, origEnd }[]
+  let currentMatch = -1;
+  let debounceTimer = null;
+  let searchActive = false;
+  let normCache = {};    // page → { norm, posMap }
+
+  // --- Normalization: diacritics + lowercase + whitespace collapse ---
+  const DIAC = '\u0105a\u00e0a\u00e1a\u00e2a\u00e3a\u00e4a\u0107c\u00e7c\u010dc\u0119e\u00e8e\u00e9e\u00eae\u00ebe\u0142l\u0144n\u00f1n\u00f3o\u00f2o\u00f4o\u00f5o\u00f6o\u015bs\u0161s\u00f9u\u00fau\u00fbu\u00fcu\u00fdy\u00ffy\u017az\u017cz\u017ez';
+  const diacMap = {};
+  for (let i = 0; i < DIAC.length; i += 2) diacMap[DIAC[i]] = DIAC[i + 1];
+
+  /**
+   * Normalize text for search: lowercase, strip diacritics, collapse whitespace.
+   * Returns { norm: string, posMap: number[] } where posMap[i] = original char index.
+   */
+  function normalize(text) {
+    let norm = '';
+    const posMap = [];
+    let lastWasSpace = false;
+
+    for (let i = 0; i < text.length; i++) {
+      let ch = text[i].toLowerCase();
+      if (diacMap[ch]) ch = diacMap[ch];
+
+      if (/\s/.test(ch)) {
+        if (!lastWasSpace) {
+          norm += ' ';
+          posMap.push(i);
+          lastWasSpace = true;
+        }
+        continue;
+      }
+      lastWasSpace = false;
+      norm += ch;
+      posMap.push(i);
+    }
+    return { norm, posMap };
+  }
+
+  function getNorm(page) {
+    if (!normCache[page]) {
+      normCache[page] = normalize(window.ocrViewer.state.ocrText[page] || '');
+    }
+    return normCache[page];
+  }
+
+  // --- Search lifecycle ---
+
+  function openSearch() {
+    searchBar.classList.remove('d-none');
+    searchInput.focus();
+    searchInput.select();
+    searchActive = true;
+    searchToggleBtn.classList.add('active');
+  }
+
+  function closeSearch() {
+    searchBar.classList.add('d-none');
+    searchActive = false;
+    searchToggleBtn.classList.remove('active');
+    matches = [];
+    currentMatch = -1;
+    normCache = {};
+    searchCount.textContent = '0/0';
+    searchPrevBtn.disabled = true;
+    searchNextBtn.disabled = true;
+    const ov = window.ocrViewer;
+    if (ov) {
+      const t = ov.state.ocrText[ov.state.currentPage] || '';
+      if (typeof window._origUpdateTextFromOcr === 'function') window._origUpdateTextFromOcr(t);
+    }
+  }
+
+  searchToggleBtn.addEventListener('click', () => { searchActive ? closeSearch() : openSearch(); });
+  searchCloseBtn.addEventListener('click', closeSearch);
+
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); openSearch(); }
+    if (e.key === 'Escape' && searchActive) closeSearch();
+  });
+
+  searchInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); navigateMatch(e.shiftKey ? -1 : 1); }
+  });
+
+  searchInput.addEventListener('input', function() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(performSearch, 200);
+  });
+
+  searchPrevBtn.addEventListener('click', () => navigateMatch(-1));
+  searchNextBtn.addEventListener('click', () => navigateMatch(1));
+
+  // --- Core search ---
+
+  function performSearch() {
+    const raw = searchInput.value.trim();
+    matches = [];
+    currentMatch = -1;
+    normCache = {};
+
+    if (!raw || !window.ocrViewer) {
+      searchCount.textContent = '0/0';
+      searchPrevBtn.disabled = true;
+      searchNextBtn.disabled = true;
+      highlightCurrentPage();
+      return;
+    }
+
+    const queryNorm = normalize(raw).norm;
+    if (!queryNorm) { searchCount.textContent = '0/0'; return; }
+
+    const ocrText = window.ocrViewer.state.ocrText;
+    const pages = Object.keys(ocrText).map(Number).sort((a, b) => a - b);
+
+    for (const page of pages) {
+      const { norm, posMap } = getNorm(page);
+      const textLen = (ocrText[page] || '').length;
+      let pos = 0;
+      while (true) {
+        const idx = norm.indexOf(queryNorm, pos);
+        if (idx === -1) break;
+        const origStart = posMap[idx];
+        const endIdx = idx + queryNorm.length;
+        const origEnd = endIdx < posMap.length ? posMap[endIdx] : textLen;
+        matches.push({ page, origStart, origEnd });
+        pos = idx + 1;
+      }
+    }
+
+    const has = matches.length > 0;
+    searchPrevBtn.disabled = !has;
+    searchNextBtn.disabled = !has;
+
+    if (has) {
+      const cur = window.ocrViewer.state.currentPage;
+      let idx = matches.findIndex(m => m.page >= cur);
+      currentMatch = idx >= 0 ? idx : 0;
+      goToMatch();
+    } else {
+      searchCount.textContent = '0/0';
+      highlightCurrentPage();
+    }
+  }
+
+  function navigateMatch(dir) {
+    if (!matches.length) return;
+    currentMatch = (currentMatch + dir + matches.length) % matches.length;
+    goToMatch();
+  }
+
+  function goToMatch() {
+    searchCount.textContent = `${currentMatch + 1}/${matches.length}`;
+    const m = matches[currentMatch];
+
+    if (m.page !== window.ocrViewer.state.currentPage) {
+      window.ocrViewer.renderPage(m.page).then(() => {
+        highlightCurrentPage();
+      });
+    } else {
+      highlightCurrentPage();
+    }
+  }
+
+  // --- Highlighting ---
+
+  function highlightCurrentPage() {
+    if (!textDisplay || !window.ocrViewer) return;
+
+    const page = window.ocrViewer.state.currentPage;
+    const pageText = window.ocrViewer.state.ocrText[page] || '';
+    const pageMatches = searchInput.value.trim() ? matches.filter(m => m.page === page) : [];
+
+    if (pageMatches.length === 0) {
+      if (typeof window._origUpdateTextFromOcr === 'function') window._origUpdateTextFromOcr(pageText);
+      return;
+    }
+
+    // Sort by origStart (should already be, but be safe)
+    pageMatches.sort((a, b) => a.origStart - b.origStart);
+
+    const active = matches[currentMatch];
+    let activeLocal = -1;
+    if (active && active.page === page) {
+      activeLocal = pageMatches.findIndex(m => m.origStart === active.origStart);
+    }
+
+    let html = '';
+    let end = 0;
+    for (let i = 0; i < pageMatches.length; i++) {
+      const m = pageMatches[i];
+      if (m.origStart < end) continue; // skip overlapping
+      html += escapeHtml(pageText.substring(end, m.origStart));
+      const isAct = i === activeLocal;
+      const cls = isAct ? 'search-highlight active' : 'search-highlight';
+      const id = isAct ? ' id="activeSearchMatch"' : '';
+      html += `<mark class="${cls}"${id}>${escapeHtml(pageText.substring(m.origStart, m.origEnd))}</mark>`;
+      end = m.origEnd;
+    }
+    html += escapeHtml(pageText.substring(end));
+
+    textDisplay.style.whiteSpace = 'pre-wrap';
+    textDisplay.innerHTML = html;
+
+    // Scroll active match to center of text panel (not scrollIntoView which can move the whole page)
+    requestAnimationFrame(() => {
+      const el = document.getElementById('activeSearchMatch');
+      if (el) {
+        const top = el.offsetTop - textDisplay.offsetTop - (textDisplay.clientHeight / 2) + (el.offsetHeight / 2);
+        textDisplay.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      }
+    });
+  }
+
+  function escapeHtml(t) {
+    return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // Hook: re-apply highlights when user navigates pages manually (prev/next buttons)
+  // ocrViewer.updateDisplayText calls renderText() directly, so we hook it here.
+  const origDisplayText = window.ocrViewer.updateDisplayText.bind(window.ocrViewer);
+  window._origUpdateDisplayText = origDisplayText;
+  window.ocrViewer.updateDisplayText = function(text) {
+    origDisplayText(text);
+    if (searchActive && matches.length > 0) {
+      setTimeout(highlightCurrentPage, 50);
+    }
+  };
+
+  // Also keep a reference for clearHighlights (restore plain text)
+  window._origUpdateTextFromOcr = window.updateTextFromOcr;
+})();
+
 </script>
 {% endblock %}

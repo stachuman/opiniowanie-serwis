@@ -109,6 +109,15 @@ async post(url, data = {}, options = {}) {
   }
 
   /**
+   * Pobierz dane layoutu OCR (bounding boxy + tekst) dla strony
+   */
+  async getOcrLayout(docId, page) {
+    const params = {};
+    if (page != null) params.page = page;
+    return this.get(`/api/document/${docId}/ocr-layout`, params);
+  }
+
+  /**
    * Wykonaj OCR na fragmencie dokumentu
    */
   async ocrSelection(docId, selectionData) {
@@ -128,7 +137,13 @@ async post(url, data = {}, options = {}) {
    * Uruchom OCR dla dokumentu
    */
   async runOcr(docId) {
-    return this.post(`/document/${docId}/run-ocr`);
+    return this.post(`/api/document/${docId}/run-ocr`);
+  }
+
+  async runOcrMerge(docId, pages) {
+    const formData = new FormData();
+    formData.append('pages', pages);
+    return this.post(`/api/document/${docId}/run-ocr-merge`, formData);
   }
 
   // === DOCUMENT API CALLS ===

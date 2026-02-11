@@ -23,6 +23,7 @@ class OcrViewer {
 
         // Stan aplikacji
         this.state = {
+            selectionMode: false, // toggled by "rozpoznaj fragment" button
             isSelecting: false,
             startX: 0,
             startY: 0,
@@ -33,7 +34,9 @@ class OcrViewer {
             scale: 1.5,
             pageRendering: false,
             pageNumPending: null,
-            ocrText: {}, // Cache tekstu OCR dla stron
+            ocrText: {}, // Cache tekstu OCR per strona
+            fullOcrText: null, // Pełny tekst OCR (wszystkie strony)
+            layoutCache: {}, // Cache layout data per page
             currentFullPageOcr: null,
             currentViewport: null, // Dla PDF
             rotation: 0 // Kąt obrotu obrazu (0, 90, 180, 270)
@@ -73,6 +76,7 @@ class OcrViewer {
         this.elements = {
             imageContainer: this.container.querySelector('#imageContainer') || this.container.querySelector('#pdfContainer'),
             canvas: this.container.querySelector('#pdfCanvas') || this.container.querySelector('#mainImage'),
+            textOverlayLayer: this.container.querySelector('#textOverlayLayer'),
             selectionOverlay: this.container.querySelector('#selectionOverlay'),
             ocrLoader: this.container.querySelector('#ocrLoader'),
             textDisplay: this.container.querySelector('#textDisplay'),
@@ -234,6 +238,9 @@ class OcrViewer {
     this.updatePageInfo();
     await this.loadPageOcr(num);
 
+    // Render selectable text overlay from layout data
+    this.renderTextOverlay(num);
+
     // NOWE: Synchronizuj przewijanie tekstu z aktualną stroną
     this.syncTextScrollWithPage(num);
 
@@ -289,9 +296,28 @@ nextPage() {
     }
 
     /**
+     * Toggle selection mode for fragment OCR
+     */
+    setSelectionMode(on) {
+        this.state.selectionMode = on;
+        const container = this.elements.imageContainer;
+        if (container) {
+            container.style.cursor = on ? 'crosshair' : '';
+        }
+        // Update button state
+        const btn = document.getElementById('fragmentOcrBtn');
+        if (btn) {
+            btn.classList.toggle('active', on);
+            btn.classList.toggle('btn-outline-warning', !on);
+            btn.classList.toggle('btn-warning', on);
+        }
+    }
+
+    /**
      * Obsługa rozpoczęcia zaznaczania
      */
     handleMouseDown(e) {
+        if (!this.state.selectionMode) return;
         e.preventDefault();
         this.state.isSelecting = true;
 
@@ -433,6 +459,7 @@ nextPage() {
      * Wykonuje OCR na zaznaczonym fragmencie
      */
     async performOcrSelection() {
+        this.setSelectionMode(false);
         this.showLoader('Rozpoznawanie tekstu fragmentu...');
 
         try {
@@ -512,22 +539,45 @@ nextPage() {
     }
 
     /**
+     * Parsuje pełny tekst OCR na poszczególne strony
+     * Rozdziela po markerach === Strona X ===
+     */
+    parseOcrPages(fullText) {
+        const pages = {};
+        const pattern = /^=== Strona (\d+) ===$/gm;
+        let match, lastIndex = 0, lastPage = null;
+
+        while ((match = pattern.exec(fullText)) !== null) {
+            if (lastPage !== null) {
+                pages[lastPage] = fullText.substring(lastIndex, match.index).trim();
+            }
+            lastPage = parseInt(match[1]);
+            lastIndex = match.index + match[0].length;
+        }
+        if (lastPage !== null) {
+            pages[lastPage] = fullText.substring(lastIndex).trim();
+        }
+        // Fallback: jeśli nie znaleziono markerów, cały tekst = strona 1
+        if (Object.keys(pages).length === 0 && fullText.trim()) {
+            pages[1] = fullText.trim();
+        }
+        return pages;
+    }
+
+    /**
      * Aktualizuje cache OCR dla wszystkich stron
-     * NOWA FUNKCJA - zapewnia spójność między stronami
+     * Parsuje pełny tekst na poszczególne strony po markerach === Strona X ===
      */
     updateOcrCacheForAllPages(text) {
-        // Wyczyść stary cache
-        this.state.ocrText = {};
+        // Parsuj tekst na strony
+        this.state.ocrText = this.parseOcrPages(text);
 
-        // Ustaw ten sam tekst dla wszystkich stron (1 do totalPages)
-        for (let i = 1; i <= this.state.totalPages; i++) {
-            this.state.ocrText[i] = text;
-        }
-
-        // Zaktualizuj również referencję do pełnego tekstu
+        // Zachowaj pełny tekst
+        this.state.fullOcrText = text;
         this.state.currentFullPageOcr = text;
 
-        console.log(`OCR cache zaktualizowany dla ${this.state.totalPages} stron`);
+        const pageCount = Object.keys(this.state.ocrText).length;
+        console.log(`OCR cache zaktualizowany: ${pageCount} stron sparsowanych`);
     }
 
     /**
@@ -583,26 +633,26 @@ nextPage() {
      * Ładuje OCR dla strony
      */
     async loadPageOcr(page) {
-        // ZMIANA: Sprawdź cache, ale tylko jeśli jest aktualny
-        if (this.state.ocrText[page] && this.state.currentFullPageOcr) {
-            this.updateDisplayText(this.state.ocrText[page]);
-            return;
-        }
-
-        if (!this.config.documentHasFullOcr) {
-            this.setupInitialMessage();
+        // Cache hit — fullOcrText was already fetched (strict null check: "" is valid)
+        if (this.state.fullOcrText !== null) {
+            const pageText = this.state.ocrText[page] || '';
+            this.updateDisplayText(pageText);
             return;
         }
 
         this.showTextLoader();
 
         try {
-            // ZMIANA: Zawsze synchronizuj z serwerem przy pierwszym ładowaniu strony
+            // Always try to sync with server first
             const serverSyncSuccess = await this.syncWithServer();
 
             if (!serverSyncSuccess) {
-                // Wykonaj OCR dla całej strony jako fallback
-                await this.performFullPageOcr(page);
+                if (this.config.documentHasFullOcr) {
+                    // OCR done but no text file yet — try full-page OCR
+                    await this.performFullPageOcr(page);
+                } else {
+                    this.setupInitialMessage();
+                }
             }
         } catch (error) {
             console.error('Error loading page OCR:', error);
@@ -647,22 +697,18 @@ nextPage() {
         try {
             const result = await window.apiClient.getOcrText(this.config.docId);
 
-            if (result.success && result.has_ocr) {
-                // ZMIANA: Zawsze akceptuj wynik jeśli ma OCR (nawet pusty)
+            if (result.success && (result.has_ocr || result.has_text)) {
                 const text = result.text || '';
-                
-                this.updateOcrCacheForAllPages(text);
-                this.updateDisplayText(text);
 
-                if (window.textEditor) {
-                    window.textEditor.setText(text);
-                }
+                this.updateOcrCacheForAllPages(text);
+
+                // Wyświetl tekst tylko bieżącej strony
+                const pageText = this.state.ocrText[this.state.currentPage] || '';
+                console.log(`syncWithServer: strona ${this.state.currentPage}, pageText=${pageText.length} znaków (fullText=${text.length})`);
+                this.updateDisplayText(pageText);
 
                 if (text.trim()) {
                     window.alertManager.showSyncInfo();
-                } else {
-                    // Pusty OCR - pokaż odpowiedni komunikat
-                    this.setupInitialMessage();
                 }
                 return true;
             }
@@ -766,6 +812,95 @@ nextPage() {
      */
     handleResize() {
         this.hideSelection();
+        // Re-render text overlay with new dimensions
+        if (this.config.docType === 'pdf' && this.state.currentPage) {
+            this.renderTextOverlay(this.state.currentPage);
+        }
+    }
+
+    // === TEXT OVERLAY FUNCTIONS ===
+
+    /**
+     * Render selectable text overlay from OCR layout data
+     */
+    async renderTextOverlay(pageNum) {
+        if (!this.elements.textOverlayLayer) return;
+        if (this.config.docType !== 'pdf') return;
+
+        // Clear existing overlay
+        this.clearTextOverlay();
+
+        try {
+            // Check cache first
+            let blocks = this.state.layoutCache[pageNum];
+
+            if (!blocks) {
+                // Fetch layout data for this page
+                const result = await window.apiClient.getOcrLayout(this.config.docId, pageNum);
+
+                if (!result.success || !result.has_layout) {
+                    return; // No layout data available - graceful degradation
+                }
+
+                blocks = result.blocks;
+                this.state.layoutCache[pageNum] = blocks;
+            }
+
+            if (!blocks || blocks.length === 0) return;
+
+            // Get canvas display dimensions
+            const canvas = this.elements.canvas;
+            const rect = canvas.getBoundingClientRect();
+            const displayW = rect.width;
+            const displayH = rect.height;
+
+            // Position the overlay to match canvas
+            const overlay = this.elements.textOverlayLayer;
+            overlay.style.width = displayW + 'px';
+            overlay.style.height = displayH + 'px';
+
+            // Offset overlay to match canvas position within container
+            const container = this.elements.imageContainer;
+            const containerRect = container.getBoundingClientRect();
+            overlay.style.left = (rect.left - containerRect.left) + 'px';
+            overlay.style.top = (rect.top - containerRect.top) + 'px';
+
+            // Create span elements for each text block
+            for (const block of blocks) {
+                if (block.category === 'Picture' || !block.text) continue;
+
+                const bbox = block.bbox; // [x1, y1, x2, y2] normalized 0-1
+                const x = bbox[0] * displayW;
+                const y = bbox[1] * displayH;
+                const w = (bbox[2] - bbox[0]) * displayW;
+                const h = (bbox[3] - bbox[1]) * displayH;
+
+                if (w < 2 || h < 2) continue; // Skip tiny blocks
+
+                const span = document.createElement('span');
+                span.textContent = block.text;
+                span.style.left = x + 'px';
+                span.style.top = y + 'px';
+                span.style.width = w + 'px';
+                span.style.height = h + 'px';
+                span.style.fontSize = Math.max(6, Math.min(h * 0.85, 24)) + 'px';
+
+                overlay.appendChild(span);
+            }
+
+        } catch (error) {
+            console.error('Error rendering text overlay:', error);
+            // Graceful degradation - continue without overlay
+        }
+    }
+
+    /**
+     * Clear the text overlay layer
+     */
+    clearTextOverlay() {
+        if (this.elements.textOverlayLayer) {
+            this.elements.textOverlayLayer.innerHTML = '';
+        }
     }
 
     // === ROTATION FUNCTIONS ===
@@ -782,6 +917,7 @@ nextPage() {
         console.log(`Obrót obrazu: ${this.state.rotation}°`);
         this.applyRotation();
         this.hideSelection(); // Ukryj zaznaczenie po obrocie
+        this.clearTextOverlay(); // Clear overlay on rotation
     }
 
     /**
@@ -792,6 +928,7 @@ nextPage() {
         console.log('Reset obrotu obrazu');
         this.applyRotation();
         this.hideSelection();
+        this.clearTextOverlay();
     }
 
     /**
